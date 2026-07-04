@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+<title>File Expo</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ═══════════ SCREEN 1 : CONNECT ═══════════ -->
+<div id="screen-conn" class="screen">
+  <div class="conn-wrap">
+    <div class="conn-hero">
+      <div class="logo-big">🗄️</div>
+      <h1>File Expo</h1>
+      <p class="muted">Your VPS, managed like a desktop.<br/>Connect over SSH — File Expo sets up the server for you.</p>
+      <div class="distro-badges">
+        <span class="badge ok">Ubuntu</span>
+        <span class="badge ok">Debian</span>
+        <span class="badge">Arch</span>
+        <span class="badge">Fedora</span>
+        <span class="badge">Alpine</span>
+      </div>
+    </div>
+
+    <div class="conn-panel">
+      <div class="conn-saved">
+        <h3>Saved servers</h3>
+        <div id="profileList" class="profile-list"></div>
+      </div>
+
+      <div class="conn-form">
+        <h3 id="formTitle">New connection</h3>
+        <div class="frow">
+          <label>Name</label>
+          <input id="fName" placeholder="My VPS" />
+        </div>
+        <div class="frow two">
+          <div>
+            <label>Host / IP</label>
+            <input id="fHost" placeholder="203.0.113.10" />
+          </div>
+          <div class="port">
+            <label>Port</label>
+            <input id="fPort" value="22" />
+          </div>
+        </div>
+        <div class="frow">
+          <label>Username</label>
+          <input id="fUser" placeholder="root" />
+        </div>
+        <div class="frow">
+          <label>Authentication</label>
+          <div class="seg">
+            <button id="authPass" class="seg-btn active">Password</button>
+            <button id="authKey" class="seg-btn">SSH key</button>
+          </div>
+        </div>
+        <div class="frow" id="rowPass">
+          <label>Password</label>
+          <input id="fPass" type="password" placeholder="••••••••" />
+        </div>
+        <div class="frow hidden" id="rowKey">
+          <label>Private key file</label>
+          <div class="keyrow">
+            <input id="fKey" placeholder="C:\Users\you\.ssh\id_rsa" />
+            <button id="btnPickKey" class="btn sm">Browse</button>
+          </div>
+          <label style="margin-top:8px">Passphrase (optional)</label>
+          <input id="fPhrase" type="password" placeholder="key passphrase" />
+        </div>
+        <div id="connError" class="conn-error hidden"></div>
+        <div class="frow actions">
+          <button id="btnSaveProfile" class="btn">💾 Save</button>
+          <button id="btnConnect" class="btn primary grow">⚡ Connect</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ SCREEN 2 : SETUP INSTALLER ═══════════ -->
+<div id="screen-setup" class="screen hidden">
+  <div class="setup-wrap">
+    <div class="setup-head">
+      <div class="setup-spinner" id="setupSpinner"></div>
+      <h1 id="setupTitle">Setting up your server</h1>
+      <p class="muted" id="setupSub">Installing File Expo components — just like an OS installation. Sit back.</p>
+    </div>
+
+    <div class="setup-progress">
+      <div class="pbar"><div id="setupBar" class="pbar-fill" style="width:2%"></div></div>
+      <div class="pbar-meta"><span id="setupPct">0%</span><span id="setupStepLabel">Starting…</span></div>
+    </div>
+
+    <div class="setup-body">
+      <ul id="setupSteps" class="setup-steps">
+        <li data-i="0"><span class="s-ic">○</span> Probing system</li>
+        <li data-i="1"><span class="s-ic">○</span> Checking privileges</li>
+        <li data-i="2"><span class="s-ic">○</span> Refreshing package index</li>
+        <li data-i="3"><span class="s-ic">○</span> Installing components</li>
+        <li data-i="4"><span class="s-ic">○</span> Verifying tools</li>
+        <li data-i="5"><span class="s-ic">○</span> Creating workspace</li>
+      </ul>
+      <pre id="setupLog" class="setup-log"></pre>
+    </div>
+
+    <div class="setup-foot">
+      <button id="btnLaunchFM" class="btn primary big hidden">🚀 Launch File Manager</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ SCREEN 3 : FILE MANAGER ═══════════ -->
+<div id="screen-fm" class="screen hidden">
+  <div class="topbar">
+    <span class="brand">🗄️ File Expo</span>
+    <span id="connInfo" class="conn-chip"></span>
+    <span class="spacer"></span>
+    <button id="btnDisconnect" class="btn sm danger-ghost">Disconnect</button>
+  </div>
+
+  <div class="toolbar">
+    <button id="navBack" class="ibtn" title="Back (Alt+←)">←</button>
+    <button id="navFwd" class="ibtn" title="Forward">→</button>
+    <button id="navUp" class="ibtn" title="Up (Backspace)">↑</button>
+    <button id="navRefresh" class="ibtn" title="Refresh (F5)">⟳</button>
+    <div id="breadcrumb" class="breadcrumb"></div>
+    <input id="pathInput" class="path-input hidden" spellcheck="false" />
+    <input id="filterInput" class="filter-input" placeholder="Filter… (Enter = deep search)" />
+  </div>
+
+  <div class="actionbar">
+    <button id="actUpload" class="btn sm">⬆ Upload files</button>
+    <button id="actUploadFolder" class="btn sm">⬆ Folder</button>
+    <button id="actDownload" class="btn sm" disabled>⬇ Download</button>
+    <span class="vsep"></span>
+    <button id="actNewFolder" class="btn sm">📁+ New folder</button>
+    <button id="actNewFile" class="btn sm">📄+ New file</button>
+    <span class="vsep"></span>
+    <button id="actDelete" class="btn sm danger-ghost" disabled>🗑 Delete</button>
+    <span class="spacer"></span>
+    <label class="chk"><input type="checkbox" id="chkHidden" /> Hidden files</label>
+    <button id="actConsole" class="btn sm ghost">＞_ Console</button>
+    <button id="actTransfers" class="btn sm ghost">⇅ Transfers <span id="transferCount" class="cnt hidden">0</span></button>
+  </div>
+
+  <div class="fm-main">
+    <aside class="sidebar">
+      <h4>Places</h4>
+      <div id="places" class="places"></div>
+      <h4>Bookmarks</h4>
+      <div id="bookmarks" class="places"></div>
+      <button id="btnAddBookmark" class="btn sm ghost wide">＋ Bookmark this folder</button>
+    </aside>
+
+    <section class="file-area">
+      <div id="searchBanner" class="search-banner hidden">
+        <span id="searchBannerText"></span>
+        <button id="btnCloseSearch" class="btn sm">✕ Close results</button>
+      </div>
+      <div class="list-head" id="listHead">
+        <span class="col-name sortable" data-k="name">Name <i></i></span>
+        <span class="col-size sortable" data-k="size">Size <i></i></span>
+        <span class="col-perm">Permissions</span>
+        <span class="col-owner">Owner</span>
+        <span class="col-date sortable" data-k="mtime">Modified <i></i></span>
+      </div>
+      <div id="fileList" class="file-list" tabindex="0"></div>
+      <div id="dropHint" class="drop-hint hidden">⬆ Drop to upload here</div>
+    </section>
+  </div>
+
+  <div id="panelTransfers" class="bottom-panel hidden">
+    <div class="bp-head"><b>Transfers</b>
+      <button id="btnClearTransfers" class="btn sm ghost">Clear finished</button>
+      <span class="spacer"></span><button class="ibtn" id="closeTransfers">✕</button>
+    </div>
+    <div id="transferList" class="transfer-list"></div>
+  </div>
+
+  <div id="panelConsole" class="bottom-panel hidden">
+    <div class="bp-head"><b>Console</b> <span class="muted" id="consoleCwd"></span>
+      <span class="spacer"></span>
+      <button id="btnClearConsole" class="btn sm ghost">Clear</button>
+      <button class="ibtn" id="closeConsole">✕</button>
+    </div>
+    <pre id="consoleOut" class="console-out"></pre>
+    <div class="console-in">
+      <span class="prompt">$</span>
+      <input id="consoleInput" spellcheck="false" placeholder="run a command in the current folder…" />
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <span id="statItems"></span>
+    <span id="statSel"></span>
+    <span class="spacer"></span>
+    <span id="statSys" class="muted"></span>
+  </div>
+</div>
+
+<!-- context menu -->
+<div id="ctxMenu" class="ctx hidden"></div>
+
+<!-- ═══════════ MODALS ═══════════ -->
+<div id="modalBack" class="modal-back hidden">
+
+  <div id="modalInput" class="modal hidden">
+    <h3 id="miTitle">Input</h3>
+    <input id="miValue" spellcheck="false" />
+    <div class="m-actions">
+      <button class="btn" data-close>Cancel</button>
+      <button id="miOk" class="btn primary">OK</button>
+    </div>
+  </div>
+
+  <div id="modalConfirm" class="modal hidden">
+    <h3 id="mcTitle">Confirm</h3>
+    <p id="mcText" class="muted"></p>
+    <div class="m-actions">
+      <button class="btn" data-close>Cancel</button>
+      <button id="mcOk" class="btn danger">Delete</button>
+    </div>
+  </div>
+
+  <div id="modalEditor" class="modal wide hidden">
+    <h3>✏️ <span id="meName"></span> <span id="meDirty" class="muted"></span></h3>
+    <textarea id="meText" spellcheck="false"></textarea>
+    <div class="m-actions">
+      <span class="muted" id="meInfo"></span>
+      <span class="spacer"></span>
+      <button class="btn" data-close>Close</button>
+      <button id="meSave" class="btn primary">💾 Save (Ctrl+S)</button>
+    </div>
+  </div>
+
+  <div id="modalChmod" class="modal hidden">
+    <h3>🔐 Permissions — <span id="chName"></span></h3>
+    <table class="chmod-table">
+      <tr><th></th><th>Read</th><th>Write</th><th>Execute</th></tr>
+      <tr><th>Owner</th><td><input type="checkbox" data-b="8"></td><td><input type="checkbox" data-b="7"></td><td><input type="checkbox" data-b="6"></td></tr>
+      <tr><th>Group</th><td><input type="checkbox" data-b="5"></td><td><input type="checkbox" data-b="4"></td><td><input type="checkbox" data-b="3"></td></tr>
+      <tr><th>Others</th><td><input type="checkbox" data-b="2"></td><td><input type="checkbox" data-b="1"></td><td><input type="checkbox" data-b="0"></td></tr>
+    </table>
+    <div class="frow two" style="margin-top:10px">
+      <div><label>Octal</label><input id="chOctal" maxlength="4" /></div>
+      <div style="display:flex;align-items:flex-end"><label class="chk"><input type="checkbox" id="chRec" /> Recursive</label></div>
+    </div>
+    <div class="m-actions">
+      <button class="btn" data-close>Cancel</button>
+      <button id="chOk" class="btn primary">Apply</button>
+    </div>
+  </div>
+
+  <div id="modalProps" class="modal hidden">
+    <h3>ℹ️ <span id="ppName"></span></h3>
+    <div id="ppBody" class="props"></div>
+    <div class="m-actions"><button class="btn primary" data-close>Close</button></div>
+  </div>
+
+</div>
+
+<div id="toasts" class="toasts"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
