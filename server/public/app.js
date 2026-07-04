@@ -251,8 +251,18 @@ async function doLogin() {
 }
 
 /* ══════════ file manager ══════════ */
+const CLIENT_VERSION = '1.2.2';
+
 async function enterFileManager() {
   S.sys = await api('sysinfo');
+  // stale-cache guard: if the server runs a different version than this script,
+  // force one reload to pick up the matching assets (loop-protected)
+  if (S.sys.version && S.sys.version !== CLIENT_VERSION && !sessionStorage.getItem('fx-vreload')) {
+    sessionStorage.setItem('fx-vreload', '1');
+    location.reload();
+    return;
+  }
+  sessionStorage.removeItem('fx-vreload');
   switchScreen('fm');
   $('connInfo').textContent = `${S.sys.user}@${S.sys.hostname} · ${S.sys.distro}`;
   $('statSys').textContent = `${S.sys.uname}${S.sys.isRoot ? ' · root' : ''}`;
@@ -1337,6 +1347,10 @@ async function showTab(id) {
   const el = $('toolsBody');
   el.onclick = null;
   el.innerHTML = '<div class="muted" style="padding:24px">Loading…</div>';
+  if (typeof TABS[id] !== 'function') {
+    el.innerHTML = '<div class="muted" style="padding:24px">⚠ This section needs the latest app version.<br/>Press <b>Ctrl+Shift+R</b> to hard-refresh the page.</div>';
+    return;
+  }
   try { await TABS[id](el); }
   catch (err) { el.innerHTML = `<div class="muted" style="padding:24px">⚠ ${esc(err.message)}</div>`; }
 }

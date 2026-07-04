@@ -14,7 +14,7 @@ const os = require('os');
 const CONF_DIR = process.env.FILE_EXPO_CONF || '/etc/file-expo';
 const CONF_FILE = path.join(CONF_DIR, 'config.json');
 const PUB = path.join(__dirname, 'public');
-const VERSION = '1.2.1';
+const VERSION = '1.2.2';
 const REPO = 'zamansheikh/file-expo';
 const BRANCH = 'main';
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -151,7 +151,15 @@ function serveStatic(req, res, urlPath) {
   if (!rel || !fs.existsSync(path.join(PUB, rel))) rel = 'index.html';
   const fp = path.join(PUB, rel);
   const ext = path.extname(fp).toLowerCase();
-  res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+  if (rel === 'index.html') {
+    // version-stamp asset URLs so browsers never mix old JS with new HTML
+    let html = fs.readFileSync(fp, 'utf8')
+      .replace('href="styles.css"', `href="styles.css?v=${VERSION}"`)
+      .replace('src="app.js"', `src="app.js?v=${VERSION}"`);
+    res.writeHead(200, { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-cache' });
+    return res.end(html);
+  }
+  res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
   fs.createReadStream(fp).pipe(res);
 }
 
