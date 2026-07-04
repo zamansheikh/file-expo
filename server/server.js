@@ -14,7 +14,7 @@ const os = require('os');
 const CONF_DIR = process.env.FILE_EXPO_CONF || '/etc/file-expo';
 const CONF_FILE = path.join(CONF_DIR, 'config.json');
 const PUB = path.join(__dirname, 'public');
-const VERSION = '1.2.2';
+const VERSION = '1.3.0';
 const REPO = 'zamansheikh/file-expo';
 const BRANCH = 'main';
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -565,6 +565,71 @@ async function handleApi(req, res, u) {
     return json(res, 200, { code: r.code, output: (r.stdout + r.stderr).trim().slice(-2000) });
   }
 
+  /* ---------- pm2 ---------- */
+  if (route === 'pm2/list') {
+    if (!(await hasCmd('pm2'))) return json(res, 200, { installed: false, procs: [] });
+    const r = await run('pm2 jlist 2>/dev/null', { timeout: 30000 });
+    let procs = [];
+    try {
+      const start = r.stdout.indexOf('[');
+      const arr = start >= 0 ? JSON.parse(r.stdout.slice(start)) : [];
+      procs = arr.map(p => ({
+        id: p.pm_id, name: p.name, pid: p.pid || 0,
+        status: (p.pm2_env || {}).status || '?',
+        cpu: (p.monit || {}).cpu || 0,
+        mem: (p.monit || {}).memory || 0,
+        restarts: (p.pm2_env || {}).restart_time || 0,
+        uptime: (p.pm2_env || {}).pm_uptime || 0,
+        script: (p.pm2_env || {}).pm_exec_path || ''
+      }));
+    } catch (e) {}
+    return json(res, 200, { installed: true, procs });
+  }
+
+  if (route === 'pm2/action' && req.method === 'POST') {
+    const b = await readBody(req);
+    if (b.action === 'save') {
+      const r = await run('pm2 save --force 2>&1', { timeout: 30000 });
+      if (r.code !== 0) return json(res, 400, { error: (r.stdout + r.stderr).slice(-400) });
+      return json(res, 200, { ok: true });
+    }
+    if (!['start', 'stop', 'restart', 'reload', 'delete'].includes(b.action)) return json(res, 400, { error: 'Bad action' });
+    if (!/^[\w.-]+$/.test(String(b.id))) return json(res, 400, { error: 'Bad process id' });
+    const r = await run(`pm2 ${b.action} ${q(String(b.id))} 2>&1`, { timeout: 60000 });
+    if (r.code !== 0) return json(res, 400, { error: (r.stdout + r.stderr).trim().slice(-400) });
+    return json(res, 200, { ok: true });
+  }
+
+  if (route === 'pm2/logs') {
+    const id = P.get('id') || '';
+    if (!/^[\w.-]+$/.test(id)) return json(res, 400, { error: 'Bad id' });
+    const r = await run(`pm2 logs ${q(id)} --lines 150 --nostream 2>&1 | tail -c 60000`, { timeout: 30000 });
+    return json(res, 200, { text: r.stdout.trim() || '(no logs)' });
+  }
+
+  if (route === 'pm2/start' && req.method === 'POST') {
+    const b = await readBody(req);
+    const target = String(b.target || '').trim();
+    if (!target) return json(res, 400, { error: 'Enter a script path or command' });
+    const name = String(b.name || '').trim();
+    if (name && !/^[\w.-]{1,64}$/.test(name)) return json(res, 400, { error: 'Name: letters, numbers, dots, dashes only' });
+    const nameArg = name ? `--name ${q(name)}` : '';
+    // plain script/binary path -> start directly; anything with spaces -> run via bash -c
+    const cmd = /\s/.test(target)
+      ? `pm2 start bash ${nameArg} -- -c ${q(target)}`
+      : `pm2 start ${q(target)} ${nameArg}`;
+    const r = await run(cmd + ' 2>&1', { timeout: 60000, cwd: b.cwd || '/' });
+    if (r.code !== 0) return json(res, 400, { error: (r.stdout + r.stderr).trim().slice(-500) });
+    return json(res, 200, { ok: true });
+  }
+
+  if (route === 'pm2/install' && req.method === 'POST') {
+    if (!(await hasCmd('npm'))) return json(res, 400, { error: 'npm is not installed — install Node.js with npm first' });
+    const r = await run('npm install -g pm2 2>&1', { timeout: 420000 });
+    if (!(await hasCmd('pm2'))) return json(res, 400, { error: 'PM2 install failed: ' + (r.stdout + r.stderr).slice(-400) });
+    return json(res, 200, { ok: true });
+  }
+
   /* ---------- docker ---------- */
   if (route === 'docker/ps') {
     if (!(await hasCmd('docker'))) return json(res, 200, { installed: false, containers: [] });
@@ -838,22 +903,61 @@ async function handleApi(req, res, u) {
     if (hasNginx && dirs) {
       const files = await fsp.readdir(dirs.avail).catch(() => []);
       for (const f of files) {
-        if (!f.startsWith('fx-')) continue;
         try {
-          const txt = await fsp.readFile(path.join(dirs.avail, f), 'utf8');
+          const full = path.join(dirs.avail, f);
+          const st = await fsp.stat(full);
+          if (st.isDirectory() || st.size > 512 * 1024) continue;
+          const txt = await fsp.readFile(full, 'utf8');
+          if (!/server\s*\{/.test(txt) && !/server_name/.test(txt)) continue;
           const domain = ((txt.match(/server_name\s+([^;]+);/) || [])[1] || f).trim();
           const proxy = (txt.match(/proxy_pass\s+([^;]+);/) || [])[1];
-          const root = (txt.match(/root\s+([^;]+);/) || [])[1];
+          const root = (txt.match(/^\s*root\s+([^;]+);/m) || [])[1];
           sites.push({
-            file: f, domain,
+            file: f, path: full, domain,
             target: (proxy || root || '').trim(),
-            mode: proxy ? 'proxy' : 'static',
-            ssl: /listen\s+443/.test(txt)
+            mode: proxy ? 'proxy' : root ? 'static' : 'other',
+            ssl: /listen\s+(\[::\]:)?443/.test(txt),
+            managed: f.startsWith('fx-'),
+            enabled: dirs.enabled ? fs.existsSync(path.join(dirs.enabled, f)) : true
           });
         } catch (e) {}
       }
     }
-    return json(res, 200, { hasNginx, hasCertbot, sites });
+    return json(res, 200, {
+      hasNginx, hasCertbot,
+      layout: dirs ? (dirs.enabled ? 'debian' : 'confd') : null,
+      sites
+    });
+  }
+
+  if (route === 'domains/reload' && req.method === 'POST') {
+    const t = await run('nginx -t 2>&1');
+    if (t.code !== 0) return json(res, 400, { error: 'nginx config test FAILED — nothing reloaded:\n' + (t.stdout + t.stderr).slice(-800) });
+    await run('systemctl reload nginx 2>/dev/null || nginx -s reload');
+    return json(res, 200, { ok: true, output: (t.stdout + t.stderr).trim() });
+  }
+
+  if (route === 'domains/toggle' && req.method === 'POST') {
+    const b = await readBody(req);
+    const f = String(b.file || '');
+    if (!/^[\w.@-]+$/.test(f)) return json(res, 400, { error: 'Bad file name' });
+    const dirs = nginxDirs();
+    if (!dirs || !dirs.enabled) return json(res, 400, { error: 'Enable/disable needs a sites-available/sites-enabled layout' });
+    const availPath = path.join(dirs.avail, f);
+    const enabledPath = path.join(dirs.enabled, f);
+    if (!fs.existsSync(availPath)) return json(res, 400, { error: 'Config not found' });
+    if (b.enable) {
+      await run(`ln -sf ${q(availPath)} ${q(enabledPath)}`);
+      const t = await run('nginx -t 2>&1');
+      if (t.code !== 0) {
+        await fsp.unlink(enabledPath).catch(() => {});
+        return json(res, 400, { error: 'Config test failed — site NOT enabled:\n' + (t.stdout + t.stderr).slice(-600) });
+      }
+    } else {
+      await fsp.unlink(enabledPath).catch(() => {});
+    }
+    await run('systemctl reload nginx 2>/dev/null || nginx -s reload');
+    return json(res, 200, { ok: true });
   }
 
   if (route === 'domains/add' && req.method === 'POST') {

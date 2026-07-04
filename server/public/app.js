@@ -251,7 +251,7 @@ async function doLogin() {
 }
 
 /* ══════════ file manager ══════════ */
-const CLIENT_VERSION = '1.2.2';
+const CLIENT_VERSION = '1.3.0';
 
 async function enterFileManager() {
   S.sys = await api('sysinfo');
@@ -1498,20 +1498,28 @@ TABS.cron = async (el) => {
 
 TABS.domains = async (el) => {
   const d = await api('domains/list');
+  const canToggle = d.layout === 'debian';
   el.innerHTML = `
     <div class="tool-note">
       ${d.hasNginx ? '<span class="badge ok">nginx ✓</span>' : '<span class="badge">nginx — will be installed automatically</span>'}
       ${d.hasCertbot ? '<span class="badge ok">certbot ✓</span>' : '<span class="badge">certbot — installed when you enable HTTPS</span>'}
+      <span class="spacer"></span>
+      <button id="domReload" class="btn sm">✔ Test &amp; reload nginx</button>
+      <button id="domRefresh" class="btn sm ghost">⟳</button>
     </div>
-    <div class="dom-list">${d.sites.length ? d.sites.map(s => `
-      <div class="dom-item">
+    <div class="dom-list">${d.sites.length ? d.sites.map((s, i) => `
+      <div class="dom-item ${s.enabled ? '' : 'expired'}">
         <span class="dom-name">🌐 ${esc(s.domain)}</span>
-        <span class="muted">${s.mode === 'proxy' ? '→ ' + esc(s.target) : '📁 ' + esc(s.target)}</span>
-        ${s.ssl ? '<span class="badge ok">HTTPS 🔒</span>' : `<button class="btn sm" data-ssl="${esc(s.domain)}">🔒 Enable HTTPS</button>`}
+        <span class="muted" style="font-size:11.5px">${s.mode === 'proxy' ? '→ ' + esc(s.target) : s.mode === 'static' ? '📁 ' + esc(s.target) : esc(s.file)}</span>
+        <span class="badge ${s.managed ? 'ok' : ''}">${s.managed ? 'File Expo' : 'detected'}</span>
+        ${s.enabled ? '' : '<span class="badge">disabled</span>'}
+        ${s.ssl ? '<span class="badge ok">HTTPS 🔒</span>' : (s.managed ? `<button class="btn sm" data-ssl="${esc(s.domain)}">🔒 Enable HTTPS</button>` : '')}
         <span class="spacer"></span>
-        <a class="btn sm ghost" href="http${s.ssl ? 's' : ''}://${esc(s.domain)}" target="_blank" rel="noopener">Open ↗</a>
-        <button class="btn sm danger-ghost" data-del="${esc(s.domain)}">Remove</button>
-      </div>`).join('') : '<div class="muted" style="padding:14px">No domains attached yet — add your first one below.</div>'}
+        <a class="btn sm ghost" href="http${s.ssl ? 's' : ''}://${esc(s.domain)}" target="_blank" rel="noopener" title="Open in browser">↗</a>
+        <button class="btn sm" data-edit="${i}" title="Edit the nginx config file">✎ Edit</button>
+        ${canToggle ? `<button class="btn sm ghost" data-tog="${i}">${s.enabled ? 'Disable' : 'Enable'}</button>` : ''}
+        ${s.managed ? `<button class="btn sm danger-ghost" data-del="${esc(s.domain)}">Remove</button>` : ''}
+      </div>`).join('') : '<div class="muted" style="padding:14px">No nginx sites found — attach your first domain below.</div>'}
     </div>
     <h4 style="margin:18px 0 8px">Attach a domain</h4>
     <div class="dom-form">
@@ -1533,6 +1541,18 @@ TABS.domains = async (el) => {
   el.querySelector('#domMode').onchange = (e) => {
     el.querySelector('#domTarget').placeholder = e.target.value === 'proxy' ? '3000' : '/var/www/mysite';
   };
+  el.querySelector('#domRefresh').onclick = () => TABS.domains(el);
+  el.querySelector('#domReload').onclick = async () => {
+    const lg = el.querySelector('#domLog');
+    lg.classList.remove('hidden');
+    lg.textContent = 'Testing nginx config…';
+    try {
+      const r = await api('domains/reload', {});
+      lg.textContent = (r.output || '') + '\n✓ nginx reloaded';
+      toast('nginx reloaded', 'ok');
+    } catch (err) { lg.textContent = '✗ ' + err.message; toast('nginx test failed', 'err'); }
+  };
+  const sites = d.sites;
   el.querySelector('#domAdd').onclick = async () => {
     const btn = el.querySelector('#domAdd');
     const lg = el.querySelector('#domLog');
@@ -1556,6 +1576,26 @@ TABS.domains = async (el) => {
   el.onclick = (e) => {
     const ssl = e.target.closest('button[data-ssl]');
     const del = e.target.closest('button[data-del]');
+    const ed = e.target.closest('button[data-edit]');
+    const tog = e.target.closest('button[data-tog]');
+    if (ed) {
+      const s = sites[+ed.dataset.edit];
+      closeModal();
+      openEditor(s.path, s.file);
+      toast('After saving, open Tools → Domains → "Test & reload nginx"', '', 6000);
+      return;
+    }
+    if (tog) {
+      const s = sites[+tog.dataset.tog];
+      (async () => {
+        try {
+          await api('domains/toggle', { file: s.file, enable: !s.enabled });
+          toast(s.enabled ? 'Site disabled' : 'Site enabled', 'ok');
+          TABS.domains(el);
+        } catch (err) { toast(err.message, 'err', 7000); }
+      })();
+      return;
+    }
     if (ssl) {
       const domain = ssl.dataset.ssl;
       promptModal(`Email for Let's Encrypt (${domain})`, '', async (email) => {
@@ -1742,7 +1782,7 @@ function paletteSources() {
   act('🗑', 'Open Trash', openTrash);
   act('📎', 'Copy current path', () => navigator.clipboard.writeText(S.cwd).then(() => toast('Path copied', 'ok', 1500)));
   act('📊', 'Analyze folder sizes here', () => openSizes(S.cwd));
-  for (const [tab, label] of [['overview', 'Overview'], ['services', 'Services'], ['processes', 'Processes'], ['ports', 'Ports'], ['cron', 'Cron'], ['domains', 'Domains'], ['docker', 'Docker'], ['shares', 'Share links']]) {
+  for (const [tab, label] of [['overview', 'Overview'], ['services', 'Services'], ['processes', 'Processes'], ['ports', 'Ports'], ['cron', 'Cron'], ['domains', 'Domains'], ['docker', 'Docker'], ['pm2', 'PM2'], ['shares', 'Share links']]) {
     src.push({ icon: '🧰', label: 'Tools: ' + label, kind: 'Tools', run: () => { openModal('modalTools'); showTab(tab); } });
   }
   for (const [ic, label, fn] of PLACES) src.push({ icon: ic, label: 'Go to ' + label, kind: 'Place', run: () => go(fn()) });
@@ -1858,6 +1898,99 @@ TABS.docker = async (el) => {
     }
     b.disabled = true;
     try { await api('docker/action', { id, action: a }); toast(a + ': done', 'ok'); TABS.docker(el); }
+    catch (err) { toast(err.message, 'err'); b.disabled = false; }
+  };
+};
+
+TABS.pm2 = async (el) => {
+  const d = await api('pm2/list');
+  if (!d.installed) {
+    el.innerHTML = `<div class="muted" style="padding:24px">📗 PM2 is not installed on this server.<br/><br/>
+      PM2 keeps your Node/Python/any apps running forever and restarts them on crash or reboot.<br/><br/>
+      <button id="pm2Install" class="btn primary">⬇ Install PM2 now</button>
+      <span id="pm2InstMsg" class="muted" style="margin-left:10px"></span></div>`;
+    el.querySelector('#pm2Install').onclick = async () => {
+      const btn = el.querySelector('#pm2Install');
+      btn.disabled = true;
+      el.querySelector('#pm2InstMsg').textContent = 'Installing (npm install -g pm2) — up to a minute…';
+      try { await api('pm2/install', {}); toast('PM2 installed 🎉', 'ok'); TABS.pm2(el); }
+      catch (err) { toast(err.message, 'err', 8000); btn.disabled = false; el.querySelector('#pm2InstMsg').textContent = ''; }
+    };
+    return;
+  }
+  el.innerHTML = `<div class="tool-bar">
+      <span class="muted">${d.procs.length} process(es)</span>
+      <span class="spacer"></span>
+      <button id="pmSave" class="btn sm" title="pm2 save — survive reboots">💾 Save list</button>
+      <button id="pmRefresh" class="btn sm">⟳ Refresh</button>
+    </div>
+    <div class="ttable-wrap"><table class="ttable"><thead><tr><th style="width:20px"></th><th>Name</th><th>Status</th><th>CPU</th><th>Memory</th><th>↻</th><th>Uptime</th><th style="width:190px">Actions</th></tr></thead>
+    <tbody>${d.procs.map(p => `<tr>
+      <td><span class="dot ${p.status === 'online' ? 'on' : p.status === 'errored' ? 'err' : ''}"></span></td>
+      <td class="mono" title="${esc(p.script)}">${esc(p.name)} <span class="dim">#${p.id}</span></td>
+      <td>${esc(p.status)}</td>
+      <td>${p.cpu}%</td>
+      <td>${humanSize(p.mem)}</td>
+      <td class="dim">${p.restarts}</td>
+      <td class="dim">${p.status === 'online' && p.uptime ? fmtUptime((Date.now() - p.uptime) / 1000) : '—'}</td>
+      <td>
+        <button class="btn sm" data-a="start" data-id="${p.id}" title="Start">▶</button>
+        <button class="btn sm" data-a="stop" data-id="${p.id}" title="Stop">■</button>
+        <button class="btn sm" data-a="restart" data-id="${p.id}" title="Restart">⟳</button>
+        <button class="btn sm" data-a="logs" data-id="${p.id}" title="Logs">📜</button>
+        <button class="btn sm danger-ghost" data-a="delete" data-id="${p.id}" title="Delete from PM2">✖</button>
+      </td></tr>`).join('') || '<tr><td colspan="8" class="dim" style="padding:14px">No processes yet — start one below.</td></tr>'}</tbody></table></div>
+    <h4 style="margin:14px 0 8px">Start a new app</h4>
+    <div class="dom-form">
+      <input id="pmTarget" placeholder="server.js — or a command like: npm run start" style="flex:2">
+      <input id="pmName" placeholder="app name" style="flex:1">
+      <input id="pmCwd" placeholder="working folder" style="flex:1">
+      <button id="pmStart" class="btn primary sm">＋ Start</button>
+    </div>
+    <p class="muted" style="font-size:12px;margin-top:6px">Runs from the working folder. Click <b>💾 Save list</b> afterwards so apps auto-start on reboot (needs <code>pm2 startup</code> once — run it in the Console).</p>
+    <pre id="pmLogs" class="tool-pre hidden"></pre>`;
+  el.querySelector('#pmCwd').value = S.cwd;
+  el.querySelector('#pmRefresh').onclick = () => TABS.pm2(el);
+  el.querySelector('#pmSave').onclick = async () => {
+    try { await api('pm2/action', { action: 'save' }); toast('Process list saved', 'ok'); }
+    catch (err) { toast(err.message, 'err'); }
+  };
+  el.querySelector('#pmStart').onclick = async () => {
+    const btn = el.querySelector('#pmStart');
+    btn.disabled = true; btn.textContent = 'Starting…';
+    try {
+      await api('pm2/start', {
+        target: el.querySelector('#pmTarget').value,
+        name: el.querySelector('#pmName').value,
+        cwd: el.querySelector('#pmCwd').value || S.cwd
+      });
+      toast('App started under PM2 🎉', 'ok');
+      TABS.pm2(el);
+    } catch (err) { toast(err.message, 'err', 8000); btn.disabled = false; btn.textContent = '＋ Start'; }
+  };
+  el.onclick = async (e) => {
+    const b = e.target.closest('button[data-a]');
+    if (!b) return;
+    const id = b.dataset.id, a = b.dataset.a;
+    if (a === 'logs') {
+      const lg = el.querySelector('#pmLogs');
+      lg.classList.remove('hidden');
+      lg.textContent = 'Loading logs…';
+      try { const r = await api('pm2/logs?id=' + encodeURIComponent(id)); lg.textContent = r.text; }
+      catch (err) { lg.textContent = '⚠ ' + err.message; }
+      lg.scrollTop = lg.scrollHeight;
+      return;
+    }
+    if (a === 'delete') {
+      confirmModal('Remove from PM2?', 'The app stops and is removed from the PM2 list (files are untouched).', async () => {
+        await api('pm2/action', { id, action: 'delete' });
+        toast('Removed', 'ok');
+        openModal('modalTools'); TABS.pm2(el);
+      }, 'Remove');
+      return;
+    }
+    b.disabled = true;
+    try { await api('pm2/action', { id, action: a }); toast(a + ': done', 'ok'); TABS.pm2(el); }
     catch (err) { toast(err.message, 'err'); b.disabled = false; }
   };
 };
