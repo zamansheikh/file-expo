@@ -90,12 +90,25 @@
   </div>
 </div>
 
+<!-- ═══════════ UPDATING ═══════════ -->
+<div id="screen-update" class="screen center-screen hidden">
+  <div class="card center">
+    <div class="setup-spinner"></div>
+    <h1 style="margin-top:18px">Updating File Expo…</h1>
+    <p class="muted" style="margin-top:8px">Downloading the new version from GitHub.<br/>The service restarts automatically — this page will reload.</p>
+  </div>
+</div>
+
 <!-- ═══════════ FILE MANAGER ═══════════ -->
 <div id="screen-fm" class="screen hidden">
   <div class="topbar">
     <span class="brand">🗄️ File Expo</span>
     <span id="connInfo" class="conn-chip"></span>
+    <span id="verChip" class="ver-chip"></span>
+    <button id="btnUpdate" class="btn sm primary hidden">⬆ Update</button>
     <span class="spacer"></span>
+    <button id="btnTools" class="btn sm ghost">🧰 Tools</button>
+    <button id="btnViews" class="btn sm ghost">🧩 Views</button>
     <button id="btnDisconnect" class="btn sm danger-ghost">Sign out</button>
   </div>
 
@@ -239,6 +252,39 @@
   <div id="modalProps" class="modal hidden">
     <h3>ℹ️ <span id="ppName"></span></h3>
     <div id="ppBody" class="props"></div>
+    <div class="m-actions"><button class="btn primary" data-close>Close</button></div>
+  </div>
+
+  <div id="modalViewer" class="modal wide hidden">
+    <h3><span id="vwIcon">👁️</span> <span id="vwName"></span></h3>
+    <div id="vwBody" class="viewer-body"></div>
+    <div class="m-actions">
+      <span class="muted" id="vwInfo"></span>
+      <span class="spacer"></span>
+      <button id="vwEdit" class="btn hidden">✏️ Edit</button>
+      <button id="vwDownload" class="btn">⬇ Download</button>
+      <button class="btn primary" data-close>Close</button>
+    </div>
+  </div>
+
+  <div id="modalViews" class="modal hidden" style="width:520px">
+    <h3>🧩 Views — file preview add-ons</h3>
+    <p class="muted" style="margin-bottom:12px;font-size:12.5px">Install views to preview more file types right in the explorer.</p>
+    <div id="viewsList" class="views-list"></div>
+    <div class="m-actions"><button class="btn primary" data-close>Done</button></div>
+  </div>
+
+  <div id="modalTools" class="modal xl hidden">
+    <h3>🧰 Server tools</h3>
+    <div class="tabs" id="toolsTabs">
+      <button data-tab="overview" class="tab active">📊 Overview</button>
+      <button data-tab="services" class="tab">🧩 Services</button>
+      <button data-tab="processes" class="tab">⚡ Processes</button>
+      <button data-tab="ports" class="tab">🔌 Ports</button>
+      <button data-tab="cron" class="tab">⏰ Cron</button>
+      <button data-tab="domains" class="tab">🌐 Domains</button>
+    </div>
+    <div id="toolsBody" class="tools-body"></div>
     <div class="m-actions"><button class="btn primary" data-close>Close</button></div>
   </div>
 

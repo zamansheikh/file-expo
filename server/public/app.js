@@ -87,7 +87,7 @@ function toast(msg, type = '', ms = 3500) {
   setTimeout(() => { t.style.opacity = '0'; t.style.transition = '0.3s'; setTimeout(() => t.remove(), 350); }, ms);
 }
 
-const SCREENS = ['screen-boot', 'screen-welcome', 'screen-notoken', 'screen-login', 'screen-setup', 'screen-fm'];
+const SCREENS = ['screen-boot', 'screen-welcome', 'screen-notoken', 'screen-login', 'screen-setup', 'screen-update', 'screen-fm'];
 function switchScreen(name) {
   SCREENS.forEach(id => $(id).classList.toggle('hidden', id !== 'screen-' + name));
 }
@@ -254,7 +254,9 @@ async function enterFileManager() {
   switchScreen('fm');
   $('connInfo').textContent = `${S.sys.user}@${S.sys.hostname} · ${S.sys.distro}`;
   $('statSys').textContent = `${S.sys.uname}${S.sys.isRoot ? ' · root' : ''}`;
+  $('verChip').textContent = 'v' + (S.sys.version || '');
   document.title = `File Expo — ${S.sys.hostname}`;
+  checkUpdate();
   S.history = []; S.hIdx = -1;
   renderPlaces();
   renderBookmarks();
@@ -480,8 +482,14 @@ function selectedPaths() {
 function openItem(it) {
   const full = it.fullPath || pjoin(S.cwd, it.name);
   if (it.isDir) { go(full); return; }
+  const match = viewerForFile(it.name);
+  if (match) {
+    if (match.installed) return openViewer(match.v, it);
+    toast(`Install the “${match.v.name}” view in 🧩 Views to preview this file`, '', 4000);
+  }
   if (looksTexty(it.name) || it.size < 512 * 1024) openEditor(full, it.name);
-  else toast('Binary file — use Download instead', '', 3000);
+  else if (installedViews().has('hex')) openViewer(VIEWERS.find(v => v.id === 'hex'), it);
+  else toast('Binary file — use Download, or install the Hex view in 🧩 Views', '', 3500);
 }
 
 // sorting
@@ -521,13 +529,15 @@ $('btnCloseSearch').addEventListener('click', refresh);
 $('chkHidden').addEventListener('change', () => { S.showHidden = $('chkHidden').checked; renderList(); });
 
 /* ---------- modals ---------- */
+const ALL_MODALS = ['modalInput', 'modalConfirm', 'modalEditor', 'modalChmod', 'modalProps', 'modalViewer', 'modalViews', 'modalTools'];
 function openModal(id) {
   $('modalBack').classList.remove('hidden');
-  ['modalInput', 'modalConfirm', 'modalEditor', 'modalChmod', 'modalProps'].forEach(m => $(m).classList.toggle('hidden', m !== id));
+  ALL_MODALS.forEach(m => $(m).classList.toggle('hidden', m !== id));
 }
 function closeModal() {
   $('modalBack').classList.add('hidden');
   S.editorPath = null;
+  $('vwBody').innerHTML = ''; // stop any playing media
   $('fileList').focus();
 }
 document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', closeModal));
@@ -1013,6 +1023,453 @@ document.addEventListener('keydown', (e) => {
     if (row) row.scrollIntoView({ block: 'nearest' });
   }
 });
+
+/* ══════════ VIEWS — installable file previews ══════════ */
+const VIEWERS = [
+  { id: 'image', name: 'Image viewer', icon: '🖼️', desc: 'PNG, JPG, GIF, WebP, SVG, BMP, ICO', exts: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'], def: true },
+  { id: 'markdown', name: 'Markdown preview', icon: '📝', desc: 'Rendered README / docs preview', exts: ['md', 'markdown'], def: true },
+  { id: 'video', name: 'Video player', icon: '🎬', desc: 'MP4, WebM, MKV, MOV — with seeking', exts: ['mp4', 'webm', 'mkv', 'mov', 'm4v'], def: false },
+  { id: 'audio', name: 'Audio player', icon: '🎵', desc: 'MP3, WAV, OGG, FLAC, M4A', exts: ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac'], def: false },
+  { id: 'pdf', name: 'PDF viewer', icon: '📕', desc: 'View PDF documents inline', exts: ['pdf'], def: false },
+  { id: 'csv', name: 'CSV table', icon: '📊', desc: 'Spreadsheet-style table for CSV / TSV', exts: ['csv', 'tsv'], def: false },
+  { id: 'json', name: 'JSON formatter', icon: '🧾', desc: 'Pretty-printed JSON documents', exts: ['json'], def: false },
+  { id: 'hex', name: 'Hex viewer', icon: '🔢', desc: 'Any binary file as a hex dump (first 64 KB)', exts: [], def: false }
+];
+function installedViews() {
+  try {
+    const v = JSON.parse(localStorage.getItem('fx-views'));
+    if (Array.isArray(v)) return new Set(v);
+  } catch (e) {}
+  return new Set(VIEWERS.filter(v => v.def).map(v => v.id));
+}
+function saveViews(set) { localStorage.setItem('fx-views', JSON.stringify([...set])); }
+
+function viewerForFile(name) {
+  const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
+  if (!ext) return null;
+  const inst = installedViews();
+  for (const v of VIEWERS) if (v.exts.includes(ext)) return { v, installed: inst.has(v.id) };
+  return null;
+}
+
+$('btnViews').addEventListener('click', () => { renderViewsList(); openModal('modalViews'); });
+
+function renderViewsList() {
+  const inst = installedViews();
+  const box = $('viewsList');
+  box.innerHTML = '';
+  for (const v of VIEWERS) {
+    const row = document.createElement('div');
+    row.className = 'view-row';
+    const on = inst.has(v.id);
+    row.innerHTML = `<span class="v-ic">${v.icon}</span>
+      <span class="v-info"><b>${esc(v.name)}</b><br/><span class="muted">${esc(v.desc)}</span></span>
+      <button class="btn sm ${on ? 'ghost installed' : 'primary'}">${on ? '✓ Installed' : 'Install'}</button>
+      <div class="vprog hidden"><div class="vprog-fill"></div></div>`;
+    const btn = row.querySelector('button');
+    btn.addEventListener('click', () => {
+      const cur = installedViews();
+      if (cur.has(v.id)) {
+        cur.delete(v.id);
+        saveViews(cur);
+        renderViewsList();
+        toast(v.name + ' removed', '', 1800);
+      } else {
+        // OS-style mini install animation
+        btn.classList.add('hidden');
+        const prog = row.querySelector('.vprog');
+        prog.classList.remove('hidden');
+        const fill = row.querySelector('.vprog-fill');
+        let p = 0;
+        const t = setInterval(() => {
+          p += 12 + Math.random() * 20;
+          fill.style.width = Math.min(100, p) + '%';
+          if (p >= 100) {
+            clearInterval(t);
+            cur.add(v.id);
+            saveViews(cur);
+            renderViewsList();
+            toast(v.name + ' installed 🎉', 'ok', 2000);
+          }
+        }, 130);
+      }
+    });
+    box.appendChild(row);
+  }
+}
+
+async function openViewer(v, it) {
+  const full = it.fullPath || pjoin(S.cwd, it.name);
+  const raw = '/api/raw?path=' + encodeURIComponent(full);
+  $('vwName').textContent = it.name;
+  $('vwIcon').textContent = v.icon;
+  $('vwInfo').textContent = full + (it.size ? ' · ' + humanSize(it.size) : '');
+  $('vwDownload').onclick = () => {
+    const a = document.createElement('a');
+    a.href = '/api/download?path=' + encodeURIComponent(full);
+    a.download = '';
+    document.body.appendChild(a); a.click(); a.remove();
+  };
+  const textual = ['markdown', 'csv', 'json'].includes(v.id);
+  $('vwEdit').classList.toggle('hidden', !textual);
+  $('vwEdit').onclick = () => { closeModal(); openEditor(full, it.name); };
+  const body = $('vwBody');
+  body.innerHTML = '<div class="muted" style="padding:30px;text-align:center">Loading…</div>';
+  openModal('modalViewer');
+  try {
+    if (v.id === 'image') {
+      body.innerHTML = `<img src="${raw}" alt="${esc(it.name)}">`;
+    } else if (v.id === 'video') {
+      body.innerHTML = `<video src="${raw}" controls autoplay></video>`;
+    } else if (v.id === 'audio') {
+      body.innerHTML = `<div class="audio-wrap"><div style="font-size:56px">🎵</div><audio src="${raw}" controls autoplay></audio></div>`;
+    } else if (v.id === 'pdf') {
+      body.innerHTML = `<iframe src="${raw}" title="pdf"></iframe>`;
+    } else if (v.id === 'markdown') {
+      const r = await api('read?path=' + encodeURIComponent(full));
+      body.innerHTML = `<div class="md-render">${renderMarkdown(r.content || '')}</div>`;
+    } else if (v.id === 'csv') {
+      const r = await api('read?path=' + encodeURIComponent(full));
+      body.innerHTML = renderCsvTable(r.content || '', it.name.toLowerCase().endsWith('.tsv') ? '\t' : ',');
+    } else if (v.id === 'json') {
+      const r = await api('read?path=' + encodeURIComponent(full));
+      let txt;
+      try { txt = JSON.stringify(JSON.parse(r.content), null, 2); } catch (e) { txt = r.content; }
+      body.innerHTML = `<pre class="json-pre">${esc(txt)}</pre>`;
+    } else if (v.id === 'hex') {
+      const resp = await fetch(raw, { headers: { Range: 'bytes=0-65535' } });
+      const buf = new Uint8Array(await resp.arrayBuffer());
+      body.innerHTML = `<pre class="json-pre">${hexDump(buf)}${it.size > 65536 ? '\n… (' + humanSize(it.size) + ' total, showing first 64 KB)' : ''}</pre>`;
+    }
+  } catch (err) {
+    body.innerHTML = `<div class="muted" style="padding:30px;text-align:center">⚠ ${esc(err.message)}</div>`;
+  }
+}
+
+function renderMarkdown(src) {
+  const codeBlocks = [];
+  let s = esc(src).replace(/```([\s\S]*?)```/g, (m, c) => {
+    codeBlocks.push(c.replace(/^[^\n]*\n/, ''));
+    return ' ' + (codeBlocks.length - 1) + ' ';
+  });
+  const inline = (t) => t
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/\*([^*]+)\*/g, '<i>$1</i>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  const out = s.split('\n').map(line => {
+    const h = line.match(/^(#{1,6})\s+(.*)/);
+    if (h) return `<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`;
+    if (/^\s*[-*]\s+/.test(line)) return '<li>' + inline(line.replace(/^\s*[-*]\s+/, '')) + '</li>';
+    if (/^\s*\d+\.\s+/.test(line)) return '<li>' + inline(line.replace(/^\s*\d+\.\s+/, '')) + '</li>';
+    if (/^&gt;\s?/.test(line)) return '<blockquote>' + inline(line.replace(/^&gt;\s?/, '')) + '</blockquote>';
+    if (/^(---|\*\*\*)\s*$/.test(line)) return '<hr>';
+    if (!line.trim()) return '';
+    return '<p>' + inline(line) + '</p>';
+  }).join('\n');
+  return out.replace(/ (\d+) /g, (m, i) => '<pre class="md-code">' + codeBlocks[+i] + '</pre>');
+}
+
+function renderCsvTable(text, sep) {
+  const rows = [];
+  let row = [], cur = '', inQ = false;
+  for (let i = 0; i < text.length && rows.length < 500; i++) {
+    const ch = text[i];
+    if (inQ) {
+      if (ch === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else inQ = false; }
+      else cur += ch;
+    }
+    else if (ch === '"') inQ = true;
+    else if (ch === sep) { row.push(cur); cur = ''; }
+    else if (ch === '\n') { row.push(cur.replace(/\r$/, '')); rows.push(row); row = []; cur = ''; }
+    else cur += ch;
+  }
+  if (cur || row.length) { row.push(cur.replace(/\r$/, '')); rows.push(row); }
+  if (!rows.length) return '<div class="muted" style="padding:30px">Empty file</div>';
+  const head = rows[0], body = rows.slice(1);
+  return `<div class="csv-wrap"><table class="ttable">
+    <thead><tr>${head.map(c => '<th>' + esc(c) + '</th>').join('')}</tr></thead>
+    <tbody>${body.map(r => '<tr>' + r.map(c => '<td>' + esc(c) + '</td>').join('') + '</tr>').join('')}</tbody>
+  </table></div>`;
+}
+
+function hexDump(buf) {
+  const lines = [];
+  for (let off = 0; off < buf.length; off += 16) {
+    const chunk = [...buf.subarray(off, off + 16)];
+    const hex = chunk.map(b => b.toString(16).padStart(2, '0')).join(' ').padEnd(47);
+    const ascii = chunk.map(b => b >= 32 && b < 127 ? String.fromCharCode(b) : '·').join('');
+    lines.push(off.toString(16).padStart(8, '0') + '  ' + hex + '  ' + esc(ascii));
+  }
+  return lines.join('\n');
+}
+
+/* ══════════ SELF-UPDATE from GitHub ══════════ */
+async function checkUpdate() {
+  try {
+    const r = await api('update/check');
+    if (r.updateAvailable) {
+      const b = $('btnUpdate');
+      b.classList.remove('hidden');
+      b.textContent = `⬆ Update to v${r.latest}`;
+      b.onclick = () => confirmModal(
+        `Update to v${r.latest}?`,
+        `A new version is on GitHub (you have v${r.current}). File Expo downloads it and restarts — your files, password and domains are untouched. Takes ~15 seconds.`,
+        doUpdate, 'Update now');
+    }
+  } catch (e) {}
+}
+async function doUpdate() {
+  const cur = S.sys.version;
+  try { await api('update/run', {}); } catch (e) { toast('Update failed to start: ' + e.message, 'err'); return; }
+  switchScreen('update');
+  const poll = setInterval(async () => {
+    try {
+      const r = await fetch('/api/state', { cache: 'no-store' }).then(x => x.json());
+      if (r.version && r.version !== cur) { clearInterval(poll); location.reload(); }
+    } catch (e) { /* server restarting */ }
+  }, 2500);
+  setTimeout(() => location.reload(), 90000); // failsafe
+}
+
+/* ══════════ SERVER TOOLS ══════════ */
+$('btnTools').addEventListener('click', () => { openModal('modalTools'); showTab('overview'); });
+document.querySelectorAll('#toolsTabs .tab').forEach(t =>
+  t.addEventListener('click', () => showTab(t.dataset.tab)));
+
+const TABS = {};
+async function showTab(id) {
+  document.querySelectorAll('#toolsTabs .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === id));
+  const el = $('toolsBody');
+  el.onclick = null;
+  el.innerHTML = '<div class="muted" style="padding:24px">Loading…</div>';
+  try { await TABS[id](el); }
+  catch (err) { el.innerHTML = `<div class="muted" style="padding:24px">⚠ ${esc(err.message)}</div>`; }
+}
+
+function fmtUptime(sec) {
+  const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+  return (d ? d + 'd ' : '') + h + 'h ' + m + 'm';
+}
+function ubar(pct) {
+  const cls = pct > 90 ? 'crit' : pct > 70 ? 'warn' : '';
+  return `<div class="ubar"><div class="ubar-fill ${cls}" style="width:${pct}%"></div></div><div class="muted" style="font-size:11px">${pct}% used</div>`;
+}
+
+TABS.overview = async (el) => {
+  const s = await api('system/stats');
+  const memPct = Math.round((1 - s.mem.avail / s.mem.total) * 100);
+  const loadPct = Math.min(100, Math.round(s.loadavg[0] / Math.max(1, s.cpus) * 100));
+  el.innerHTML = `<div class="stat-grid">
+    <div class="stat-card wide2">
+      <div class="sc-top">🖥️ System</div>
+      <div class="sc-big">${esc(s.distro)}</div>
+      <div class="muted" style="font-size:12px">${esc(s.hostname)} · up ${fmtUptime(s.uptime)} · node ${esc(s.node)} · File Expo v${esc(s.version)}</div>
+    </div>
+    <div class="stat-card">
+      <div class="sc-top">⚙️ CPU · ${s.cpus} core${s.cpus > 1 ? 's' : ''}</div>
+      <div class="sc-big">${s.loadavg[0].toFixed(2)} <span class="sc-unit">load</span></div>
+      ${ubar(loadPct)}
+    </div>
+    <div class="stat-card">
+      <div class="sc-top">🧠 Memory</div>
+      <div class="sc-big">${humanSize(s.mem.total - s.mem.avail)} <span class="sc-unit">/ ${humanSize(s.mem.total)}</span></div>
+      ${ubar(memPct)}
+    </div>
+    ${s.disks.map(d => `<div class="stat-card">
+      <div class="sc-top">💽 ${esc(d.mount)}</div>
+      <div class="sc-big">${humanSize(d.used)} <span class="sc-unit">/ ${humanSize(d.size)}</span></div>
+      ${ubar(d.pct)}
+    </div>`).join('')}
+  </div>
+  <div style="text-align:right;margin-top:10px"><button class="btn sm" id="ovRefresh">⟳ Refresh</button></div>`;
+  el.querySelector('#ovRefresh').onclick = () => TABS.overview(el);
+};
+
+TABS.services = async (el) => {
+  const list = await api('system/services');
+  if (!list.length) { el.innerHTML = '<div class="muted" style="padding:24px">systemd not available on this server.</div>'; return; }
+  el.innerHTML = `<div class="tool-bar">
+      <input id="svcFilter" placeholder="filter services…" style="width:240px">
+      <button id="svcRefresh" class="btn sm">⟳ Refresh</button>
+    </div>
+    <div class="ttable-wrap"><table class="ttable"><thead><tr><th style="width:20px"></th><th>Service</th><th>State</th><th>Description</th><th style="width:170px">Actions</th></tr></thead><tbody id="svcBody"></tbody></table></div>
+    <pre id="svcLogs" class="tool-pre hidden"></pre>`;
+  const tb = el.querySelector('#svcBody');
+  const render = () => {
+    const f = el.querySelector('#svcFilter').value.toLowerCase();
+    tb.innerHTML = list
+      .filter(s => !f || s.name.toLowerCase().includes(f) || s.desc.toLowerCase().includes(f))
+      .slice(0, 200)
+      .map(s => `<tr>
+        <td><span class="dot ${s.sub === 'running' ? 'on' : s.active === 'failed' ? 'err' : ''}"></span></td>
+        <td class="mono">${esc(s.name.replace('.service', ''))}</td>
+        <td>${esc(s.sub)}</td>
+        <td class="dim">${esc(s.desc.slice(0, 60))}</td>
+        <td>
+          <button class="btn sm" data-a="start" data-n="${esc(s.name)}" title="Start">▶</button>
+          <button class="btn sm" data-a="stop" data-n="${esc(s.name)}" title="Stop">■</button>
+          <button class="btn sm" data-a="restart" data-n="${esc(s.name)}" title="Restart">⟳</button>
+          <button class="btn sm" data-a="logs" data-n="${esc(s.name)}" title="Logs">📜</button>
+        </td></tr>`).join('');
+  };
+  render();
+  el.querySelector('#svcFilter').oninput = render;
+  el.querySelector('#svcRefresh').onclick = () => TABS.services(el);
+  tb.onclick = async (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    const n = b.dataset.n, a = b.dataset.a;
+    if (a === 'logs') {
+      const lg = el.querySelector('#svcLogs');
+      lg.classList.remove('hidden');
+      lg.textContent = 'Loading logs for ' + n + '…';
+      try {
+        const r = await api('system/logs?name=' + encodeURIComponent(n));
+        lg.textContent = r.text || '(no logs)';
+      } catch (err) { lg.textContent = '⚠ ' + err.message; }
+      lg.scrollTop = lg.scrollHeight;
+      return;
+    }
+    b.disabled = true;
+    try {
+      await api('system/service', { name: n, action: a });
+      toast(`${a} ${n.replace('.service', '')}: done`, 'ok');
+      TABS.services(el);
+    } catch (err) { toast(err.message, 'err'); b.disabled = false; }
+  };
+};
+
+TABS.processes = async (el) => {
+  const procs = await api('system/processes');
+  el.innerHTML = `<div class="tool-bar">
+      <span class="muted">Top processes by CPU</span><span class="spacer"></span>
+      <button id="prRefresh" class="btn sm">⟳ Refresh</button>
+    </div>
+    <div class="ttable-wrap"><table class="ttable"><thead><tr><th>PID</th><th>User</th><th>CPU%</th><th>MEM%</th><th>Command</th><th style="width:70px"></th></tr></thead>
+    <tbody>${procs.map(p => `<tr>
+      <td class="mono">${p.pid}</td><td>${esc(p.user)}</td><td>${esc(p.cpu)}</td><td>${esc(p.mem)}</td>
+      <td class="dim mono" title="${esc(p.cmd)}">${esc(p.cmd.slice(0, 80))}</td>
+      <td><button class="btn sm danger-ghost" data-pid="${p.pid}">Kill</button></td></tr>`).join('')}</tbody></table></div>`;
+  el.querySelector('#prRefresh').onclick = () => TABS.processes(el);
+  el.onclick = (e) => {
+    const b = e.target.closest('button[data-pid]');
+    if (!b) return;
+    const pid = b.dataset.pid;
+    confirmModal(`Kill process ${pid}?`, 'Sends SIGTERM. The process will stop.', async () => {
+      await api('system/kill', { pid: +pid });
+      toast('Signal sent to ' + pid, 'ok');
+      openModal('modalTools');
+      TABS.processes(el);
+    }, 'Kill');
+  };
+};
+
+TABS.ports = async (el) => {
+  const r = await api('system/ports');
+  el.innerHTML = `<div class="tool-bar"><span class="muted">Listening ports (ss -tulnp)</span><span class="spacer"></span><button id="poRefresh" class="btn sm">⟳ Refresh</button></div>
+    <pre class="tool-pre" style="max-height:none;flex:1">${esc(r.text)}</pre>`;
+  el.querySelector('#poRefresh').onclick = () => TABS.ports(el);
+};
+
+TABS.cron = async (el) => {
+  const r = await api('system/cron');
+  el.innerHTML = `<p class="muted" style="margin-bottom:8px;font-size:12.5px">Root crontab — one job per line: <code>minute hour day month weekday command</code>. Example: <code>0 3 * * * /opt/backup.sh</code> (daily at 3am)</p>
+    <textarea id="cronText" class="cron-text" spellcheck="false" placeholder="# no cron jobs yet"></textarea>
+    <div style="display:flex;gap:10px;margin-top:10px;justify-content:flex-end">
+      <button id="cronSave" class="btn primary sm">💾 Save crontab</button>
+    </div>`;
+  el.querySelector('#cronText').value = r.content;
+  el.querySelector('#cronSave').onclick = async () => {
+    try {
+      await api('system/cron', { content: el.querySelector('#cronText').value });
+      toast('Crontab saved', 'ok');
+    } catch (err) { toast(err.message, 'err'); }
+  };
+};
+
+TABS.domains = async (el) => {
+  const d = await api('domains/list');
+  el.innerHTML = `
+    <div class="tool-note">
+      ${d.hasNginx ? '<span class="badge ok">nginx ✓</span>' : '<span class="badge">nginx — will be installed automatically</span>'}
+      ${d.hasCertbot ? '<span class="badge ok">certbot ✓</span>' : '<span class="badge">certbot — installed when you enable HTTPS</span>'}
+    </div>
+    <div class="dom-list">${d.sites.length ? d.sites.map(s => `
+      <div class="dom-item">
+        <span class="dom-name">🌐 ${esc(s.domain)}</span>
+        <span class="muted">${s.mode === 'proxy' ? '→ ' + esc(s.target) : '📁 ' + esc(s.target)}</span>
+        ${s.ssl ? '<span class="badge ok">HTTPS 🔒</span>' : `<button class="btn sm" data-ssl="${esc(s.domain)}">🔒 Enable HTTPS</button>`}
+        <span class="spacer"></span>
+        <a class="btn sm ghost" href="http${s.ssl ? 's' : ''}://${esc(s.domain)}" target="_blank" rel="noopener">Open ↗</a>
+        <button class="btn sm danger-ghost" data-del="${esc(s.domain)}">Remove</button>
+      </div>`).join('') : '<div class="muted" style="padding:14px">No domains attached yet — add your first one below.</div>'}
+    </div>
+    <h4 style="margin:18px 0 8px">Attach a domain</h4>
+    <div class="dom-form">
+      <input id="domName" placeholder="example.com" style="flex:2">
+      <select id="domMode" class="dom-select">
+        <option value="proxy">Reverse proxy → app port</option>
+        <option value="static">Static site → folder</option>
+      </select>
+      <input id="domTarget" placeholder="3000" style="flex:1">
+      <button id="domAdd" class="btn primary sm">＋ Attach</button>
+    </div>
+    <p class="muted" style="font-size:12px;margin-top:8px">
+      1) Point the domain's DNS <b>A record</b> to this server's IP. &nbsp;
+      2) Attach it here (nginx config is written &amp; tested automatically). &nbsp;
+      3) Click <b>Enable HTTPS</b> for a free Let's Encrypt certificate with auto-renew.
+    </p>
+    <pre id="domLog" class="tool-pre hidden"></pre>`;
+
+  el.querySelector('#domMode').onchange = (e) => {
+    el.querySelector('#domTarget').placeholder = e.target.value === 'proxy' ? '3000' : '/var/www/mysite';
+  };
+  el.querySelector('#domAdd').onclick = async () => {
+    const btn = el.querySelector('#domAdd');
+    const lg = el.querySelector('#domLog');
+    btn.disabled = true; btn.textContent = 'Working…';
+    lg.classList.remove('hidden');
+    lg.textContent = 'Attaching domain… (can take a minute if nginx needs installing)';
+    try {
+      const r = await api('domains/add', {
+        domain: el.querySelector('#domName').value,
+        mode: el.querySelector('#domMode').value,
+        target: el.querySelector('#domTarget').value
+      });
+      lg.textContent = r.log.join('\n');
+      toast('Domain attached 🎉', 'ok');
+      setTimeout(() => TABS.domains(el), 1600);
+    } catch (err) {
+      lg.textContent = '✗ ' + err.message;
+      btn.disabled = false; btn.textContent = '＋ Attach';
+    }
+  };
+  el.onclick = (e) => {
+    const ssl = e.target.closest('button[data-ssl]');
+    const del = e.target.closest('button[data-del]');
+    if (ssl) {
+      const domain = ssl.dataset.ssl;
+      promptModal(`Email for Let's Encrypt (${domain})`, '', async (email) => {
+        toast('Requesting certificate — takes 1-2 minutes…', '', 8000);
+        try {
+          const r = await api('domains/ssl', { domain, email });
+          toast(r.log[r.log.length - 1], 'ok', 6000);
+        } catch (err) { toast(err.message, 'err', 8000); }
+        openModal('modalTools');
+        TABS.domains(el);
+      }, 'Get certificate');
+    } else if (del) {
+      const domain = del.dataset.del;
+      confirmModal(`Remove ${domain}?`, 'The nginx config is deleted and nginx reloads. DNS and certificates are not touched.', async () => {
+        await api('domains/delete', { domain });
+        toast('Domain removed', 'ok');
+        openModal('modalTools');
+        TABS.domains(el);
+      }, 'Remove');
+    }
+  };
+};
 
 /* ---------- init ---------- */
 boot();

@@ -350,3 +350,114 @@ code {
   background: var(--bg3); border: 1px solid var(--line); border-radius: 5px;
   padding: 1px 7px; font-family: var(--mono); font-size: 12px; user-select: text;
 }
+
+/* ══════════ v1.1 — views, tools, domains ══════════ */
+.ver-chip { font-size: 11px; color: var(--dim); border: 1px solid var(--line); border-radius: 20px; padding: 2px 10px; }
+.modal.xl { width: 1020px; max-width: 96vw; height: 86vh; display: flex; flex-direction: column; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 12px; flex-wrap: wrap; }
+.tab {
+  background: transparent; border: none; border-bottom: 2px solid transparent;
+  padding: 8px 14px; cursor: pointer; color: var(--dim); font-size: 13px;
+}
+.tab:hover { color: var(--txt); }
+.tab.active { color: var(--acc); border-bottom-color: var(--acc); }
+.tools-body { flex: 1; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; }
+
+/* overview stat cards */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.stat-card { background: var(--bg2); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+.stat-card.wide2 { grid-column: span 2; }
+.sc-top { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--dim); margin-bottom: 6px; }
+.sc-big { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+.sc-unit { font-size: 13px; font-weight: 400; color: var(--dim); }
+.ubar { height: 7px; background: var(--bg3); border-radius: 4px; overflow: hidden; margin-bottom: 3px; }
+.ubar-fill { height: 100%; background: var(--acc2); border-radius: 4px; transition: width 0.4s; }
+.ubar-fill.warn { background: var(--warn); }
+.ubar-fill.crit { background: var(--danger); }
+
+/* tool tables */
+.tool-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+.tool-bar input { width: auto; }
+.tool-note { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.ttable-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 10px; max-height: 46vh; }
+.ttable { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.ttable th {
+  text-align: left; padding: 8px 10px; background: var(--bg3); color: var(--dim);
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px;
+  position: sticky; top: 0; z-index: 1;
+}
+.ttable td { padding: 6px 10px; border-top: 1px solid rgba(34,48,65,0.5); }
+.ttable tr:hover td { background: var(--bg3); }
+.mono { font-family: var(--mono); font-size: 12px; }
+.dim { color: var(--dim); }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--line); }
+.dot.on { background: var(--acc2); box-shadow: 0 0 6px var(--acc2); }
+.dot.err { background: var(--danger); }
+.tool-pre {
+  background: #050a0f; border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px 14px; margin-top: 12px; font-family: var(--mono); font-size: 12px;
+  color: #b8e6b8; white-space: pre-wrap; word-break: break-word;
+  max-height: 240px; overflow-y: auto; user-select: text;
+}
+.cron-text {
+  flex: 1; min-height: 260px; font-family: var(--mono); font-size: 12.5px;
+  background: #070c11; resize: none; line-height: 1.6;
+}
+
+/* domains */
+.dom-list { display: flex; flex-direction: column; gap: 8px; }
+.dom-item {
+  display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+  background: var(--bg2); border: 1px solid var(--line); border-radius: 10px;
+}
+.dom-name { font-weight: 600; }
+.dom-form { display: flex; gap: 8px; align-items: center; }
+.dom-select {
+  background: var(--bg2); border: 1px solid var(--line); border-radius: 7px;
+  padding: 8px 10px; color: var(--txt);
+}
+.dom-item a.btn { text-decoration: none; display: inline-flex; align-items: center; }
+
+/* views manager */
+.views-list { display: flex; flex-direction: column; gap: 8px; max-height: 52vh; overflow-y: auto; }
+.view-row {
+  display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+  background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; position: relative;
+}
+.view-row .v-ic { font-size: 24px; }
+.view-row .v-info { flex: 1; font-size: 13px; line-height: 1.35; }
+.view-row .btn.installed { color: var(--acc2); }
+.vprog { width: 90px; height: 7px; background: var(--bg3); border-radius: 4px; overflow: hidden; }
+.vprog-fill { height: 100%; width: 0; background: var(--acc); border-radius: 4px; transition: width 0.13s; }
+
+/* viewer */
+.viewer-body {
+  flex: 1; min-height: 0; overflow: auto; display: flex;
+  align-items: center; justify-content: center;
+  background: #05090d; border: 1px solid var(--line); border-radius: 10px;
+}
+.viewer-body img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.viewer-body video { max-width: 100%; max-height: 100%; }
+.viewer-body iframe { width: 100%; height: 100%; border: none; background: #fff; }
+.audio-wrap { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+.json-pre {
+  align-self: stretch; width: 100%; padding: 14px 16px; font-family: var(--mono);
+  font-size: 12.5px; color: #b8d8f0; white-space: pre; overflow: auto; user-select: text;
+}
+.csv-wrap { align-self: stretch; width: 100%; height: 100%; overflow: auto; }
+.md-render {
+  align-self: stretch; width: 100%; padding: 22px 28px; overflow-y: auto;
+  user-select: text; line-height: 1.6; font-size: 14px;
+}
+.md-render h1, .md-render h2 { border-bottom: 1px solid var(--line); padding-bottom: 6px; margin: 18px 0 10px; }
+.md-render h3, .md-render h4, .md-render h5, .md-render h6 { margin: 14px 0 8px; }
+.md-render p { margin: 7px 0; }
+.md-render li { margin-left: 22px; }
+.md-render blockquote { border-left: 3px solid var(--acc); padding: 4px 14px; color: var(--dim); margin: 8px 0; }
+.md-render hr { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
+.md-render a { color: var(--acc); }
+.md-render .md-code {
+  background: #070c11; border: 1px solid var(--line); border-radius: 8px;
+  padding: 12px 14px; font-family: var(--mono); font-size: 12.5px; margin: 10px 0;
+  overflow-x: auto; white-space: pre;
+}

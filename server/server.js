@@ -3,6 +3,7 @@
 'use strict';
 
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
@@ -13,7 +14,10 @@ const os = require('os');
 const CONF_DIR = process.env.FILE_EXPO_CONF || '/etc/file-expo';
 const CONF_FILE = path.join(CONF_DIR, 'config.json');
 const PUB = path.join(__dirname, 'public');
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
+const REPO = 'zamansheikh/file-expo';
+const BRANCH = 'main';
+const APP_ROOT = path.resolve(__dirname, '..');
 
 /* ---------- config ---------- */
 let conf = { port: 7777, configured: false, setupToken: null, passHash: null, salt: null };
@@ -141,6 +145,91 @@ function serveStatic(req, res, urlPath) {
   res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
   fs.createReadStream(fp).pipe(res);
 }
+
+/* ---------- update / system helpers ---------- */
+const RAW_MIME = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
+  '.webp': 'image/webp', '.svg': 'image/svg+xml', '.bmp': 'image/bmp', '.ico': 'image/x-icon',
+  '.mp4': 'video/mp4', '.webm': 'video/webm', '.mkv': 'video/x-matroska', '.mov': 'video/quicktime',
+  '.m4v': 'video/mp4', '.avi': 'video/x-msvideo',
+  '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.flac': 'audio/flac',
+  '.m4a': 'audio/mp4', '.aac': 'audio/aac',
+  '.pdf': 'application/pdf', '.txt': 'text/plain; charset=utf-8'
+};
+
+function fetchUrl(url, depth = 0) {
+  return new Promise((resolve, reject) => {
+    if (depth > 4) return reject(new Error('Too many redirects'));
+    https.get(url, { headers: { 'User-Agent': 'file-expo' }, timeout: 10000 }, (r) => {
+      if (r.statusCode >= 300 && r.statusCode < 400 && r.headers.location) {
+        r.resume();
+        return resolve(fetchUrl(r.headers.location, depth + 1));
+      }
+      let d = '';
+      r.on('data', c => d += c);
+      r.on('end', () => resolve({ status: r.statusCode, body: d }));
+    }).on('error', reject).on('timeout', function () { this.destroy(new Error('timeout')); });
+  });
+}
+
+function semverGt(a, b) {
+  const pa = String(a).split('.').map(n => parseInt(n, 10) || 0);
+  const pb = String(b).split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) > (pb[i] || 0)) return true;
+    if ((pa[i] || 0) < (pb[i] || 0)) return false;
+  }
+  return false;
+}
+
+const UPDATE_SCRIPT = `#!/bin/bash
+set -e
+sleep 1
+TMP=$(mktemp -d)
+curl -fsSL "https://codeload.github.com/${REPO}/tar.gz/refs/heads/${BRANCH}" -o "$TMP/app.tar.gz"
+mkdir -p "$TMP/x"
+tar -xzf "$TMP/app.tar.gz" -C "$TMP/x" --strip-components=1
+[ -f "$TMP/x/server/server.js" ]
+rm -rf "${APP_ROOT}.new"
+cp -a "$TMP/x" "${APP_ROOT}.new"
+rm -rf "${APP_ROOT}.old"
+mv "${APP_ROOT}" "${APP_ROOT}.old" 2>/dev/null || true
+mv "${APP_ROOT}.new" "${APP_ROOT}"
+rm -rf "${APP_ROOT}.old" "$TMP"
+systemctl restart file-expo 2>/dev/null || { pkill -f "${APP_ROOT}/server/server.js" || true; sleep 1; nohup node "${APP_ROOT}/server/server.js" >/var/log/file-expo.log 2>&1 & }
+`;
+
+function detectPM() {
+  try {
+    const t = fs.readFileSync('/etc/os-release', 'utf8');
+    const id = (t.match(/^ID=("?)([^"\n]*)\1/m) || [])[2] || '';
+    const map = {
+      ubuntu: 'apt', debian: 'apt', linuxmint: 'apt', pop: 'apt', raspbian: 'apt', kali: 'apt',
+      arch: 'pacman', manjaro: 'pacman', endeavouros: 'pacman',
+      fedora: 'dnf', centos: 'dnf', rhel: 'dnf', rocky: 'dnf', almalinux: 'dnf', amzn: 'dnf', ol: 'dnf',
+      alpine: 'apk'
+    };
+    if (map[id]) return map[id];
+    const like = (t.match(/^ID_LIKE=("?)([^"\n]*)\1/m) || [])[2] || '';
+    for (const l of like.split(/\s+/)) if (map[l]) return map[l];
+  } catch (e) {}
+  return null;
+}
+const PM_INSTALL = {
+  apt: (p) => `DEBIAN_FRONTEND=noninteractive apt-get install -y ${p}`,
+  pacman: (p) => `pacman -S --noconfirm --needed ${p}`,
+  dnf: (p) => `dnf install -y ${p}`,
+  apk: (p) => `apk add ${p}`
+};
+const CERTBOT_PKGS = { apt: 'certbot python3-certbot-nginx', dnf: 'certbot python3-certbot-nginx', pacman: 'certbot certbot-nginx', apk: 'certbot certbot-nginx' };
+
+function nginxDirs() {
+  if (fs.existsSync('/etc/nginx/sites-available')) return { avail: '/etc/nginx/sites-available', enabled: '/etc/nginx/sites-enabled' };
+  if (fs.existsSync('/etc/nginx/conf.d')) return { avail: '/etc/nginx/conf.d', enabled: null };
+  return null;
+}
+const DOMAIN_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
+async function hasCmd(c) { return (await run(`command -v ${c} >/dev/null 2>&1 && echo y`)).stdout.includes('y'); }
 
 /* ---------- API ---------- */
 async function handleApi(req, res, u) {
@@ -386,6 +475,261 @@ async function handleApi(req, res, u) {
       fs.createReadStream(fp).pipe(res);
     }
     return;
+  }
+
+  /* ---------- raw preview (Range support for media seeking) ---------- */
+  if (route === 'raw') {
+    const fp = P.get('path');
+    const st = await fsp.stat(fp);
+    const ext = path.posix.extname(fp).toLowerCase();
+    const mime = RAW_MIME[ext] || 'application/octet-stream';
+    const range = req.headers.range;
+    if (range && st.size) {
+      const m = range.match(/bytes=(\d*)-(\d*)/);
+      let start = m && m[1] ? parseInt(m[1], 10) : 0;
+      let end = m && m[2] ? parseInt(m[2], 10) : st.size - 1;
+      if (isNaN(start) || start >= st.size) start = 0;
+      if (isNaN(end) || end >= st.size) end = st.size - 1;
+      res.writeHead(206, {
+        'Content-Type': mime, 'Accept-Ranges': 'bytes',
+        'Content-Range': `bytes ${start}-${end}/${st.size}`,
+        'Content-Length': end - start + 1
+      });
+      fs.createReadStream(fp, { start, end }).pipe(res);
+    } else {
+      res.writeHead(200, { 'Content-Type': mime, 'Content-Length': st.size, 'Accept-Ranges': 'bytes' });
+      fs.createReadStream(fp).pipe(res);
+    }
+    return;
+  }
+
+  /* ---------- self-update from GitHub ---------- */
+  if (route === 'update/check') {
+    try {
+      const r = await fetchUrl(`https://raw.githubusercontent.com/${REPO}/${BRANCH}/version.json`);
+      const latest = String((JSON.parse(r.body) || {}).version || '').trim();
+      return json(res, 200, { current: VERSION, latest: latest || null, updateAvailable: !!latest && semverGt(latest, VERSION) });
+    } catch (e) {
+      return json(res, 200, { current: VERSION, latest: null, updateAvailable: false, error: e.message });
+    }
+  }
+
+  if (route === 'update/run' && req.method === 'POST') {
+    const scriptPath = path.join(os.tmpdir(), 'fx-update.sh');
+    fs.writeFileSync(scriptPath, UPDATE_SCRIPT, { mode: 0o755 });
+    const child = spawn('bash', [scriptPath], { detached: true, stdio: 'ignore' });
+    child.unref();
+    return json(res, 200, { ok: true });
+  }
+
+  /* ---------- system tools ---------- */
+  if (route === 'system/stats') {
+    let mem = { total: os.totalmem(), avail: os.freemem() };
+    try {
+      const mi = fs.readFileSync('/proc/meminfo', 'utf8');
+      const g = (k) => { const m = mi.match(new RegExp('^' + k + ':\\s+(\\d+)', 'm')); return m ? parseInt(m[1], 10) * 1024 : null; };
+      if (g('MemTotal')) mem = { total: g('MemTotal'), avail: g('MemAvailable') != null ? g('MemAvailable') : g('MemFree') };
+    } catch (e) {}
+    const df = await run('df -kP 2>/dev/null | tail -n +2');
+    const disks = df.stdout.split('\n').filter(Boolean).map(l => {
+      const p = l.trim().split(/\s+/);
+      return { fs: p[0], size: (+p[1] || 0) * 1024, used: (+p[2] || 0) * 1024, pct: parseInt(p[4], 10) || 0, mount: p.slice(5).join(' ') };
+    }).filter(d => d.mount && !/^\/(dev|sys|proc|run|snap|boot\/efi)/.test(d.mount) && d.size > 0).slice(0, 6);
+    return json(res, 200, {
+      hostname: os.hostname(), distro: distroName(), uptime: os.uptime(),
+      loadavg: os.loadavg(), cpus: os.cpus().length,
+      cpuModel: (os.cpus()[0] || {}).model || '',
+      mem, disks, node: process.version, version: VERSION
+    });
+  }
+
+  if (route === 'system/services') {
+    const r = await run('systemctl list-units --type=service --all --no-pager --no-legend --plain 2>/dev/null | head -300');
+    const list = r.stdout.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+      const p = l.split(/\s+/);
+      return { name: p[0], load: p[1], active: p[2], sub: p[3], desc: p.slice(4).join(' ') };
+    }).filter(s => s.name && s.name.endsWith('.service'));
+    return json(res, 200, list);
+  }
+
+  if (route === 'system/service' && req.method === 'POST') {
+    const b = await readBody(req);
+    if (!/^[A-Za-z0-9_.@:-]+$/.test(b.name || '')) return json(res, 400, { error: 'Bad service name' });
+    if (!['start', 'stop', 'restart', 'enable', 'disable'].includes(b.action)) return json(res, 400, { error: 'Bad action' });
+    const r = await run(`systemctl ${b.action} ${q(b.name)} 2>&1`, { timeout: 60000 });
+    if (r.code !== 0) return json(res, 400, { error: (r.stdout + r.stderr).trim().slice(-400) || 'failed' });
+    return json(res, 200, { ok: true });
+  }
+
+  if (route === 'system/logs') {
+    const name = P.get('name') || '';
+    if (!/^[A-Za-z0-9_.@:-]+$/.test(name)) return json(res, 400, { error: 'Bad name' });
+    const r = await run(`journalctl -u ${q(name)} -n 150 --no-pager 2>&1 | tail -c 60000`);
+    return json(res, 200, { text: (r.stdout || r.stderr).trim() });
+  }
+
+  if (route === 'system/processes') {
+    const r = await run('ps aux --sort=-%cpu 2>/dev/null | head -50');
+    const lines = r.stdout.split('\n').filter(Boolean);
+    const procs = lines.slice(1).map(l => {
+      const p = l.trim().split(/\s+/);
+      return { user: p[0], pid: parseInt(p[1], 10), cpu: p[2], mem: p[3], stat: p[7], cmd: p.slice(10).join(' ').slice(0, 160) };
+    }).filter(x => x.pid);
+    return json(res, 200, procs);
+  }
+
+  if (route === 'system/kill' && req.method === 'POST') {
+    const b = await readBody(req);
+    const pid = parseInt(b.pid, 10);
+    if (!pid || pid < 2) return json(res, 400, { error: 'Bad pid' });
+    try { process.kill(pid, b.force ? 'SIGKILL' : 'SIGTERM'); }
+    catch (e) { return json(res, 400, { error: e.message }); }
+    return json(res, 200, { ok: true });
+  }
+
+  if (route === 'system/ports') {
+    const r = await run('ss -tulnp 2>/dev/null || netstat -tulnp 2>/dev/null');
+    return json(res, 200, { text: r.stdout.trim() || 'ss / netstat not available' });
+  }
+
+  if (route === 'system/cron' && req.method === 'GET') {
+    const r = await run('crontab -l 2>/dev/null');
+    return json(res, 200, { content: r.code === 0 ? r.stdout : '' });
+  }
+
+  if (route === 'system/cron' && req.method === 'POST') {
+    const b = await readBody(req);
+    const tmp = path.join(os.tmpdir(), 'fx-cron-' + process.pid);
+    await fsp.writeFile(tmp, String(b.content || '').replace(/\r\n/g, '\n').replace(/\n*$/, '\n'));
+    const r = await run(`crontab ${q(tmp)} 2>&1`);
+    await fsp.unlink(tmp).catch(() => {});
+    if (r.code !== 0) return json(res, 400, { error: (r.stdout + r.stderr).trim().slice(-400) });
+    return json(res, 200, { ok: true });
+  }
+
+  /* ---------- domains (nginx + certbot) ---------- */
+  if (route === 'domains/list') {
+    const hasNginx = await hasCmd('nginx');
+    const hasCertbot = await hasCmd('certbot');
+    const dirs = nginxDirs();
+    const sites = [];
+    if (hasNginx && dirs) {
+      const files = await fsp.readdir(dirs.avail).catch(() => []);
+      for (const f of files) {
+        if (!f.startsWith('fx-')) continue;
+        try {
+          const txt = await fsp.readFile(path.join(dirs.avail, f), 'utf8');
+          const domain = ((txt.match(/server_name\s+([^;]+);/) || [])[1] || f).trim();
+          const proxy = (txt.match(/proxy_pass\s+([^;]+);/) || [])[1];
+          const root = (txt.match(/root\s+([^;]+);/) || [])[1];
+          sites.push({
+            file: f, domain,
+            target: (proxy || root || '').trim(),
+            mode: proxy ? 'proxy' : 'static',
+            ssl: /listen\s+443/.test(txt)
+          });
+        } catch (e) {}
+      }
+    }
+    return json(res, 200, { hasNginx, hasCertbot, sites });
+  }
+
+  if (route === 'domains/add' && req.method === 'POST') {
+    const b = await readBody(req);
+    const domain = String(b.domain || '').toLowerCase().trim();
+    if (!DOMAIN_RE.test(domain)) return json(res, 400, { error: 'Invalid domain name (e.g. example.com)' });
+    const log = [];
+    if (!(await hasCmd('nginx'))) {
+      const pm = detectPM();
+      if (!pm || !PM_INSTALL[pm]) return json(res, 400, { error: 'nginx is not installed and the package manager is unknown — install nginx manually first' });
+      log.push('nginx not found — installing it now…');
+      const ri = await run(PM_INSTALL[pm]('nginx'), { timeout: 300000 });
+      if (ri.code !== 0) return json(res, 400, { error: 'nginx install failed: ' + (ri.stderr || ri.stdout).slice(-400) });
+      await run('systemctl enable --now nginx 2>/dev/null || nginx');
+      log.push('nginx installed and started');
+    }
+    const dirs = nginxDirs();
+    if (!dirs) return json(res, 400, { error: 'Could not locate nginx config directory' });
+    let block;
+    if (b.mode === 'static') {
+      const rootDir = String(b.target || '').trim();
+      if (!rootDir.startsWith('/')) return json(res, 400, { error: 'Static site target must be an absolute folder path (e.g. /var/www/mysite)' });
+      block = `server {
+    listen 80;
+    listen [::]:80;
+    server_name ${domain};
+    root ${rootDir};
+    index index.html index.htm;
+    location / { try_files $uri $uri/ =404; }
+}`;
+    } else {
+      const port = parseInt(b.target, 10);
+      if (!port || port < 1 || port > 65535) return json(res, 400, { error: 'Reverse-proxy target must be a port number (e.g. 3000)' });
+      block = `server {
+    listen 80;
+    listen [::]:80;
+    server_name ${domain};
+    client_max_body_size 512m;
+    location / {
+        proxy_pass http://127.0.0.1:${port};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}`;
+    }
+    const file = path.join(dirs.avail, `fx-${domain}.conf`);
+    await fsp.writeFile(file, block + '\n');
+    if (dirs.enabled) await run(`ln -sf ${q(file)} ${q(path.join(dirs.enabled, `fx-${domain}.conf`))}`);
+    log.push('Config written: ' + file);
+    const t = await run('nginx -t 2>&1');
+    if (t.code !== 0) {
+      await fsp.unlink(file).catch(() => {});
+      if (dirs.enabled) await fsp.unlink(path.join(dirs.enabled, `fx-${domain}.conf`)).catch(() => {});
+      return json(res, 400, { error: 'nginx config test failed: ' + (t.stdout + t.stderr).slice(-400) });
+    }
+    await run('systemctl reload nginx 2>/dev/null || nginx -s reload');
+    log.push(`nginx reloaded — http://${domain} is live`);
+    log.push(`Make sure ${domain} has a DNS A record pointing to this server's IP.`);
+    log.push('Next: click "Enable HTTPS" to get a free Let’s Encrypt certificate.');
+    return json(res, 200, { ok: true, log });
+  }
+
+  if (route === 'domains/ssl' && req.method === 'POST') {
+    const b = await readBody(req);
+    const domain = String(b.domain || '').toLowerCase().trim();
+    const email = String(b.email || '').trim();
+    if (!DOMAIN_RE.test(domain)) return json(res, 400, { error: 'Invalid domain' });
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(res, 400, { error: 'A valid email is required for Let’s Encrypt' });
+    const log = [];
+    if (!(await hasCmd('certbot'))) {
+      const pm = detectPM();
+      if (!pm || !CERTBOT_PKGS[pm]) return json(res, 400, { error: 'certbot is not installed and cannot be auto-installed on this distro' });
+      log.push('Installing certbot…');
+      const ri = await run(PM_INSTALL[pm](CERTBOT_PKGS[pm]), { timeout: 300000 });
+      if (ri.code !== 0) return json(res, 400, { error: 'certbot install failed: ' + (ri.stderr || ri.stdout).slice(-400) });
+      log.push('certbot installed');
+    }
+    const r = await run(`certbot --nginx -d ${q(domain)} --non-interactive --agree-tos -m ${q(email)} --redirect 2>&1`, { timeout: 300000 });
+    if (r.code !== 0) return json(res, 400, { error: (r.stdout + r.stderr).slice(-800) });
+    log.push(`SSL certificate installed — https://${domain} is live (auto-renews)`);
+    return json(res, 200, { ok: true, log });
+  }
+
+  if (route === 'domains/delete' && req.method === 'POST') {
+    const b = await readBody(req);
+    const domain = String(b.domain || '').toLowerCase().trim();
+    if (!DOMAIN_RE.test(domain)) return json(res, 400, { error: 'Invalid domain' });
+    const dirs = nginxDirs();
+    if (!dirs) return json(res, 400, { error: 'nginx config directory not found' });
+    await fsp.unlink(path.join(dirs.avail, `fx-${domain}.conf`)).catch(() => {});
+    if (dirs.enabled) await fsp.unlink(path.join(dirs.enabled, `fx-${domain}.conf`)).catch(() => {});
+    await run('systemctl reload nginx 2>/dev/null || nginx -s reload');
+    return json(res, 200, { ok: true });
   }
 
   json(res, 404, { error: 'Unknown API route: ' + route });

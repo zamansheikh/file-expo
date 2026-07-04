@@ -44,6 +44,18 @@ Re-run the install command — your password and settings are kept.
 curl -fsSL https://raw.githubusercontent.com/zamansheikh/file-expo/main/install.sh | sudo bash -s -- --uninstall
 ```
 
+## 🆕 What's new in v1.1
+
+- **🧩 Views** — installable preview add-ons: image viewer, video player (with seeking), audio player, PDF viewer, Markdown preview, CSV table, JSON formatter, hex viewer. Open **🧩 Views** in the topbar and install the ones you want.
+- **⬆ One-click updates** — when a new version is pushed to GitHub, an **Update** button appears in the explorer. Click it: the server downloads the new version and restarts itself. Settings, password and domains are kept.
+- **🧰 Server Tools** (topbar) — built for backend / DevOps / frontend work:
+  - **📊 Overview** — live CPU load, RAM, disk usage, uptime
+  - **🧩 Services** — start / stop / restart systemd services, view their logs
+  - **⚡ Processes** — top processes by CPU, kill button
+  - **🔌 Ports** — all listening ports at a glance
+  - **⏰ Cron** — edit the crontab right in the browser
+  - **🌐 Domains** — attach a domain to your server: auto-installs nginx, writes a reverse-proxy (for your Node/Django/... app on a port) or static-site config, tests and reloads nginx — then **one-click HTTPS** via Let's Encrypt (auto-install certbot, auto-renew).
+
 ## ✨ Features (web GUI)
 
 - Browse with back/forward/up, clickable breadcrumb (click it to type a path), places sidebar, bookmarks
