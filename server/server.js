@@ -14,10 +14,19 @@ const os = require('os');
 const CONF_DIR = process.env.FILE_EXPO_CONF || '/etc/file-expo';
 const CONF_FILE = path.join(CONF_DIR, 'config.json');
 const PUB = path.join(__dirname, 'public');
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const REPO = 'zamansheikh/file-expo';
 const BRANCH = 'main';
 const APP_ROOT = path.resolve(__dirname, '..');
+const TRASH_DIR = path.join(CONF_DIR, 'trash');
+
+function loadTrash() {
+  try { return JSON.parse(fs.readFileSync(path.join(TRASH_DIR, 'manifest.json'), 'utf8')); } catch (e) { return []; }
+}
+function saveTrash(list) {
+  fs.mkdirSync(TRASH_DIR, { recursive: true });
+  fs.writeFileSync(path.join(TRASH_DIR, 'manifest.json'), JSON.stringify(list, null, 2));
+}
 
 /* ---------- config ---------- */
 let conf = { port: 7777, configured: false, setupToken: null, passHash: null, salt: null };
@@ -387,8 +396,193 @@ async function handleApi(req, res, u) {
 
   if (route === 'search') {
     const base = P.get('base') || '/', query = (P.get('q') || '').replace(/[*?[\]]/g, '');
+    if (P.get('mode') === 'content') {
+      const r = await run(
+        `grep -rIn -m1 -i --exclude-dir=.git --exclude-dir=node_modules -e ${q(query)} ${q(base)} 2>/dev/null | head -200`,
+        { timeout: 45000 });
+      const out = r.stdout.split('\n').filter(Boolean).map(l => {
+        const m = l.match(/^(.*?):(\d+):(.*)$/);
+        return m ? { path: m[1], line: +m[2], snippet: m[3].trim().slice(0, 140) } : null;
+      }).filter(Boolean);
+      return json(res, 200, out);
+    }
     const r = await run(`find ${q(base)} -iname ${q('*' + query + '*')} 2>/dev/null | head -300`, { timeout: 30000 });
-    return json(res, 200, r.stdout.split('\n').map(s => s.trim()).filter(Boolean));
+    return json(res, 200, r.stdout.split('\n').map(s => s.trim()).filter(Boolean).map(p => ({ path: p })));
+  }
+
+  if (route === 'du') {
+    const p0 = P.get('path');
+    const r = await run(`du -k -d1 -- ${q(p0)} 2>/dev/null | sort -rn | head -40`, { timeout: 90000 });
+    const rows = r.stdout.split('\n').filter(Boolean).map(l => {
+      const m = l.match(/^(\d+)\s+(.*)$/);
+      return m ? { size: +m[1] * 1024, path: m[2] } : null;
+    }).filter(Boolean);
+    return json(res, 200, rows);
+  }
+
+  if (route === 'duplicate' && req.method === 'POST') {
+    const b = await readBody(req);
+    const dir = path.posix.dirname(b.path), base = path.posix.basename(b.path);
+    const dot = base.startsWith('.') ? -1 : base.lastIndexOf('.');
+    const stem = dot > 0 ? base.slice(0, dot) : base;
+    const ext = dot > 0 ? base.slice(dot) : '';
+    let cand, i = 0;
+    do { cand = path.posix.join(dir, stem + '-copy' + (i ? '-' + i : '') + ext); i++; } while (fs.existsSync(cand) && i < 100);
+    const r = await run(`cp -a -- ${q(b.path)} ${q(cand)}`);
+    if (r.code !== 0) return json(res, 400, { error: r.stderr.trim() || 'copy failed' });
+    return json(res, 200, { ok: true, name: path.posix.basename(cand) });
+  }
+
+  /* ---------- trash ---------- */
+  if (route === 'trash' && req.method === 'POST') {
+    const b = await readBody(req);
+    fs.mkdirSync(TRASH_DIR, { recursive: true });
+    const list = loadTrash();
+    const ids = [];
+    for (const p of b.paths || []) {
+      const id = crypto.randomBytes(6).toString('hex');
+      const base = path.posix.basename(p);
+      const r = await run(`mv -- ${q(p)} ${q(path.join(TRASH_DIR, id + '__' + base))}`);
+      if (r.code === 0) { list.push({ id, name: base, orig: p, at: Date.now() }); ids.push(id); }
+    }
+    saveTrash(list);
+    if (!ids.length) return json(res, 400, { error: 'Nothing could be moved to trash' });
+    return json(res, 200, { ok: true, ids });
+  }
+
+  if (route === 'trash/list') {
+    return json(res, 200, loadTrash().sort((a, b2) => b2.at - a.at));
+  }
+
+  if (route === 'trash/restore' && req.method === 'POST') {
+    const b = await readBody(req);
+    let list = loadTrash();
+    for (const id of b.ids || []) {
+      const en = list.find(x => x.id === id);
+      if (!en) continue;
+      let dest = en.orig;
+      if (fs.existsSync(dest)) dest = dest + '.restored-' + id.slice(0, 4);
+      await run(`mkdir -p -- ${q(path.posix.dirname(en.orig))}`);
+      const r = await run(`mv -- ${q(path.join(TRASH_DIR, en.id + '__' + en.name))} ${q(dest)}`);
+      if (r.code === 0) list = list.filter(x => x.id !== id);
+    }
+    saveTrash(list);
+    return json(res, 200, { ok: true });
+  }
+
+  if (route === 'trash/purge' && req.method === 'POST') {
+    const b = await readBody(req);
+    let list = loadTrash();
+    if (b.all) {
+      await run(`rm -rf -- ${q(TRASH_DIR)}`);
+      saveTrash([]);
+      return json(res, 200, { ok: true });
+    }
+    for (const id of b.ids || []) {
+      const en = list.find(x => x.id === id);
+      if (!en) continue;
+      await run(`rm -rf -- ${q(path.join(TRASH_DIR, en.id + '__' + en.name))}`);
+      list = list.filter(x => x.id !== id);
+    }
+    saveTrash(list);
+    return json(res, 200, { ok: true });
+  }
+
+  /* ---------- share links ---------- */
+  if (route === 'share/create' && req.method === 'POST') {
+    const b = await readBody(req);
+    if (!fs.existsSync(b.path)) return json(res, 400, { error: 'File not found' });
+    const hours = parseFloat(b.hours);
+    const token = crypto.randomBytes(12).toString('hex');
+    conf.shares = conf.shares || [];
+    conf.shares.push({
+      token, path: b.path, name: path.posix.basename(b.path),
+      expires: hours > 0 ? Date.now() + hours * 3600000 : null,
+      created: Date.now()
+    });
+    saveConf();
+    return json(res, 200, { ok: true, url: '/s/' + token });
+  }
+
+  if (route === 'share/list') {
+    return json(res, 200, (conf.shares || []).map(s => ({
+      ...s, expired: !!(s.expires && Date.now() > s.expires)
+    })));
+  }
+
+  if (route === 'share/revoke' && req.method === 'POST') {
+    const b = await readBody(req);
+    conf.shares = (conf.shares || []).filter(s => s.token !== b.token);
+    saveConf();
+    return json(res, 200, { ok: true });
+  }
+
+  /* ---------- multi download as archive ---------- */
+  if (route === 'download-multi') {
+    const base = P.get('base') || '/';
+    let names;
+    try { names = JSON.parse(P.get('names') || '[]'); } catch (e) { names = []; }
+    names = names.filter(n => typeof n === 'string' && n && !n.includes('/') && n !== '..');
+    if (!names.length) return json(res, 400, { error: 'No items' });
+    res.writeHead(200, {
+      'Content-Type': 'application/gzip',
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(path.posix.basename(base) || 'files')}-selection.tar.gz`
+    });
+    const tar = spawn('tar', ['-czf', '-', '-C', base, ...names]);
+    tar.stdout.pipe(res);
+    tar.on('error', () => res.end());
+    req.on('close', () => tar.kill());
+    return;
+  }
+
+  /* ---------- git ---------- */
+  if (route === 'git/info') {
+    const p0 = P.get('path');
+    const top = await run(`git -C ${q(p0)} rev-parse --show-toplevel 2>/dev/null`);
+    if (top.code !== 0) return json(res, 200, { repo: false });
+    const branch = (await run(`git -C ${q(p0)} branch --show-current 2>/dev/null`)).stdout.trim();
+    const sb = (await run(`git -C ${q(p0)} status -sb 2>/dev/null | head -1`)).stdout.trim();
+    const status = (await run(`git -C ${q(p0)} status --porcelain 2>/dev/null | head -60`)).stdout.trimEnd();
+    const log = (await run(`git -C ${q(p0)} log --oneline -12 2>/dev/null`)).stdout.trimEnd();
+    return json(res, 200, {
+      repo: true, root: top.stdout.trim(), branch, sb, status, log,
+      changes: status ? status.split('\n').length : 0
+    });
+  }
+
+  if (route === 'git/action' && req.method === 'POST') {
+    const b = await readBody(req);
+    if (!['pull', 'fetch'].includes(b.action)) return json(res, 400, { error: 'Bad action' });
+    const r = await run(`git -C ${q(b.path)} ${b.action} 2>&1`, { timeout: 120000 });
+    return json(res, 200, { code: r.code, output: (r.stdout + r.stderr).trim().slice(-2000) });
+  }
+
+  /* ---------- docker ---------- */
+  if (route === 'docker/ps') {
+    if (!(await hasCmd('docker'))) return json(res, 200, { installed: false, containers: [] });
+    const r = await run(`docker ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}' 2>/dev/null`);
+    const containers = r.stdout.split('\n').filter(Boolean).map(l => {
+      const p = l.split('|');
+      return { id: p[0], name: p[1] || '', image: p[2] || '', status: p[3] || '', ports: p[4] || '' };
+    });
+    return json(res, 200, { installed: true, containers });
+  }
+
+  if (route === 'docker/action' && req.method === 'POST') {
+    const b = await readBody(req);
+    if (!/^[A-Za-z0-9_.-]+$/.test(b.id || '')) return json(res, 400, { error: 'Bad container id' });
+    if (!['start', 'stop', 'restart', 'rm'].includes(b.action)) return json(res, 400, { error: 'Bad action' });
+    const cmd = b.action === 'rm' ? 'rm -f' : b.action;
+    const r = await run(`docker ${cmd} ${q(b.id)} 2>&1`, { timeout: 60000 });
+    if (r.code !== 0) return json(res, 400, { error: (r.stdout + r.stderr).trim().slice(-400) });
+    return json(res, 200, { ok: true });
+  }
+
+  if (route === 'docker/logs') {
+    const id = P.get('id') || '';
+    if (!/^[A-Za-z0-9_.-]+$/.test(id)) return json(res, 400, { error: 'Bad id' });
+    const r = await run(`docker logs --tail 150 ${q(id)} 2>&1 | tail -c 60000`);
+    return json(res, 200, { text: r.stdout.trim() || '(no logs)' });
   }
 
   if (route === 'props') {
@@ -736,10 +930,38 @@ async function handleApi(req, res, u) {
 }
 
 /* ---------- server ---------- */
+async function handleShare(req, res, u) {
+  const token = u.pathname.slice(3);
+  const sh = (conf.shares || []).find(s => s.token === token);
+  if (!sh) return json(res, 404, { error: 'This share link does not exist or was revoked' });
+  if (sh.expires && Date.now() > sh.expires) return json(res, 410, { error: 'This share link has expired' });
+  const st = await fsp.stat(sh.path).catch(() => null);
+  if (!st) return json(res, 404, { error: 'The shared file no longer exists' });
+  const base = path.posix.basename(sh.path) || 'file';
+  if (st.isDirectory()) {
+    res.writeHead(200, {
+      'Content-Type': 'application/gzip',
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(base)}.tar.gz`
+    });
+    const tar = spawn('tar', ['-czf', '-', '-C', path.posix.dirname(sh.path) || '/', base]);
+    tar.stdout.pipe(res);
+    tar.on('error', () => res.end());
+    req.on('close', () => tar.kill());
+  } else {
+    res.writeHead(200, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': st.size,
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(base)}`
+    });
+    fs.createReadStream(sh.path).pipe(res);
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://x');
   try {
     if (u.pathname.startsWith('/api/')) await handleApi(req, res, u);
+    else if (u.pathname.startsWith('/s/')) await handleShare(req, res, u);
     else serveStatic(req, res, u.pathname);
   } catch (err) {
     if (!res.headersSent) json(res, 500, { error: err.message });

@@ -461,3 +461,75 @@ code {
   padding: 12px 14px; font-family: var(--mono); font-size: 12.5px; margin: 10px 0;
   overflow-x: auto; white-space: pre;
 }
+
+/* ══════════ v1.2 — grid, palette, trash, git, du ══════════ */
+.file-list.grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 8px; padding: 12px; align-content: start;
+}
+.gcell {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 12px 8px 9px; border-radius: 10px; border: 1px solid transparent;
+  cursor: default; text-align: center;
+}
+.gcell:hover { background: var(--bg3); border-color: var(--line); }
+.gcell.sel { background: var(--sel); border-color: var(--acc); }
+.gcell.cut { opacity: 0.45; }
+.gicon { font-size: 38px; line-height: 1; height: 52px; display: flex; align-items: center; }
+.gthumb {
+  width: 76px; height: 52px; object-fit: cover; border-radius: 6px;
+  border: 1px solid var(--line); background: #05090d;
+}
+.gname {
+  font-size: 12px; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; line-height: 1.3;
+}
+.gsize { font-size: 10.5px; color: var(--dim); }
+.snippet {
+  display: block; font-size: 11px; color: var(--dim); font-family: var(--mono);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px;
+}
+.git-chip { color: var(--acc2); font-family: var(--mono); font-size: 12px; }
+
+/* command palette */
+.palette {
+  position: fixed; inset: 0; z-index: 400; background: rgba(4,8,12,0.55);
+  display: flex; justify-content: center; padding-top: 12vh; backdrop-filter: blur(2px);
+}
+.pal-box {
+  width: 560px; max-width: 92vw; height: fit-content;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 28px 80px rgba(0,0,0,0.65); overflow: hidden;
+}
+.pal-box input {
+  border: none; border-bottom: 1px solid var(--line); border-radius: 0;
+  padding: 14px 18px; font-size: 15px; background: transparent;
+}
+.pal-list { max-height: 46vh; overflow-y: auto; padding: 6px; }
+.pal-item {
+  display: flex; align-items: center; gap: 12px; padding: 8px 12px;
+  border-radius: 8px; cursor: pointer; font-size: 13.5px;
+}
+.pal-item.active, .pal-item:hover { background: var(--sel); }
+.pal-ic { width: 22px; text-align: center; }
+.pal-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pal-kind { font-size: 10.5px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* undo toast */
+.toast-undo { display: flex; align-items: center; gap: 14px; }
+.toast-undo .btn { flex-shrink: 0; }
+
+/* folder sizes */
+.du-list { align-self: stretch; width: 100%; padding: 18px 24px; overflow-y: auto; }
+.du-total { margin-bottom: 14px; font-size: 15px; }
+.du-row {
+  display: flex; align-items: center; gap: 14px; padding: 7px 0;
+  border-bottom: 1px solid rgba(34,48,65,0.4); cursor: default;
+}
+.du-row:hover { background: var(--bg3); }
+.du-name { width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }
+.du-bar { flex: 1; height: 12px; background: var(--bg3); border-radius: 6px; overflow: hidden; }
+.du-fill { height: 100%; background: linear-gradient(90deg, var(--acc), #7cc4ff); border-radius: 6px; }
+.du-size { width: 84px; text-align: right; color: var(--dim); font-size: 12.5px; flex-shrink: 0; }
+
+.dom-item.expired { opacity: 0.55; }

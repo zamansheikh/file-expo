@@ -131,7 +131,10 @@
     <button id="actNewFile" class="btn sm">📄+ New file</button>
     <span class="vsep"></span>
     <button id="actDelete" class="btn sm danger-ghost" disabled>🗑 Delete</button>
+    <button id="gitChip" class="btn sm ghost git-chip hidden"></button>
     <span class="spacer"></span>
+    <button id="btnPalette" class="btn sm ghost" title="Command palette (Ctrl+K)">⌘K</button>
+    <button id="btnViewMode" class="btn sm ghost" title="Toggle list / grid view">▦</button>
     <label class="chk"><input type="checkbox" id="chkHidden" /> Hidden files</label>
     <button id="actConsole" class="btn sm ghost">＞_ Console</button>
     <button id="actTransfers" class="btn sm ghost">⇅ Transfers <span id="transferCount" class="cnt hidden">0</span></button>
@@ -144,6 +147,10 @@
       <h4>Bookmarks</h4>
       <div id="bookmarks" class="places"></div>
       <button id="btnAddBookmark" class="btn sm ghost wide">＋ Bookmark this folder</button>
+      <h4>System</h4>
+      <div class="places">
+        <div class="place" id="plTrash"><span>🗑</span><span>Trash</span></div>
+      </div>
     </aside>
 
     <section class="file-area">
@@ -274,6 +281,28 @@
     <div class="m-actions"><button class="btn primary" data-close>Done</button></div>
   </div>
 
+  <div id="modalTrash" class="modal hidden" style="width:640px">
+    <h3>🗑 Trash</h3>
+    <div id="trashList" class="views-list" style="max-height:48vh"></div>
+    <div class="m-actions">
+      <button id="btnEmptyTrash" class="btn danger-ghost">Empty trash</button>
+      <span class="spacer"></span>
+      <button class="btn primary" data-close>Close</button>
+    </div>
+  </div>
+
+  <div id="modalGit" class="modal hidden" style="width:640px">
+    <h3>⎇ Git — <span id="gitBranch"></span></h3>
+    <div class="muted" id="gitSb" style="margin-bottom:10px;font-family:var(--mono);font-size:12px"></div>
+    <pre id="gitBody" class="tool-pre" style="margin-top:0;max-height:44vh"></pre>
+    <div class="m-actions">
+      <button id="gitFetch" class="btn">Fetch</button>
+      <button id="gitPull" class="btn primary">⬇ Pull</button>
+      <span class="spacer"></span>
+      <button class="btn" data-close>Close</button>
+    </div>
+  </div>
+
   <div id="modalTools" class="modal xl hidden">
     <h3>🧰 Server tools</h3>
     <div class="tabs" id="toolsTabs">
@@ -283,11 +312,21 @@
       <button data-tab="ports" class="tab">🔌 Ports</button>
       <button data-tab="cron" class="tab">⏰ Cron</button>
       <button data-tab="domains" class="tab">🌐 Domains</button>
+      <button data-tab="docker" class="tab">🐳 Docker</button>
+      <button data-tab="shares" class="tab">🔗 Shares</button>
     </div>
     <div id="toolsBody" class="tools-body"></div>
     <div class="m-actions"><button class="btn primary" data-close>Close</button></div>
   </div>
 
+</div>
+
+<!-- command palette -->
+<div id="palette" class="palette hidden">
+  <div class="pal-box">
+    <input id="palInput" placeholder="Type a command, file, or /path…  (Esc to close)" spellcheck="false" autocomplete="off" />
+    <div id="palList" class="pal-list"></div>
+  </div>
 </div>
 
 <div id="toasts" class="toasts"></div>

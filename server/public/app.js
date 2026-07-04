@@ -28,7 +28,9 @@ const S = {
   history: [], hIdx: -1,
   clipboard: null, filter: '', searchMode: false,
   transfers: new Map(), transferSeq: 0,
-  editorPath: null, editorDirty: false, chmodTarget: null
+  editorPath: null, editorDirty: false, chmodTarget: null,
+  view: localStorage.getItem('fx-viewmode') || 'list',
+  lastSearch: null, git: null
 };
 
 // ---------- helpers ----------
@@ -408,28 +410,47 @@ function renderAll() {
   renderBookmarks();
   renderList();
   $('consoleCwd').textContent = S.cwd;
+  updateGitChip();
+}
+
+const IMG_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico']);
+function isImage(name) {
+  const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
+  return IMG_EXTS.has(ext);
 }
 
 function renderList() {
   const box = $('fileList');
   box.innerHTML = '';
+  const grid = S.view === 'grid' && !S.searchMode;
+  box.classList.toggle('grid', grid);
+  $('listHead').classList.toggle('hidden', grid);
   const list = visibleItems();
   if (!list.length) {
-    box.innerHTML = `<div class="empty-dir">${S.filter ? 'No matches for “' + esc(S.filter) + '”' : S.searchMode ? 'No results' : '📂 This folder is empty'}</div>`;
+    box.innerHTML = `<div class="empty-dir">${S.filter ? 'No matches for “' + esc(S.filter) + '”' : S.searchMode ? 'No results' : '📂 This folder is empty<br><span style="font-size:12px">drop files here to upload</span>'}</div>`;
   }
   const cutSet = S.clipboard && S.clipboard.cut ? new Set(S.clipboard.paths) : null;
   for (const it of list) {
     const row = document.createElement('div');
     const full = it.fullPath || pjoin(S.cwd, it.name);
-    row.className = 'frow-item' + (S.sel.has(it.name) ? ' sel' : '') + (cutSet && cutSet.has(full) ? ' cut' : '');
+    const selCls = (S.sel.has(it.name) ? ' sel' : '') + (cutSet && cutSet.has(full) ? ' cut' : '');
     row.dataset.name = it.name;
-    const displayName = S.searchMode ? it.fullPath : it.name;
-    row.innerHTML =
-      `<span class="col-name"><span class="fic">${iconFor(it)}</span><span class="fname" title="${esc(displayName)}">${esc(displayName)}${it.isLink ? ' <span class="lnk">→ link</span>' : ''}</span></span>` +
-      `<span class="col-size">${it.isDir ? '—' : humanSize(it.size)}</span>` +
-      `<span class="col-perm">${esc(it.perms || '')}</span>` +
-      `<span class="col-owner">${esc(String(it.owner ?? ''))}</span>` +
-      `<span class="col-date">${fmtDate(it.mtime)}</span>`;
+    if (grid) {
+      row.className = 'gcell' + selCls;
+      const thumb = !it.isDir && isImage(it.name) && it.size < 5 * 1024 * 1024
+        ? `<img class="gthumb" loading="lazy" src="/api/raw?path=${encodeURIComponent(full)}" alt="">`
+        : `<span class="gicon">${iconFor(it)}</span>`;
+      row.innerHTML = `${thumb}<span class="gname" title="${esc(it.name)}">${esc(it.name)}</span><span class="gsize">${it.isDir ? '' : humanSize(it.size)}</span>`;
+    } else {
+      row.className = 'frow-item' + selCls;
+      const displayName = S.searchMode ? it.fullPath : it.name;
+      row.innerHTML =
+        `<span class="col-name"><span class="fic">${iconFor(it)}</span><span class="fname" title="${esc(displayName)}">${esc(displayName)}${it.isLink ? ' <span class="lnk">→ link</span>' : ''}${it.snippet ? `<span class="snippet">${esc(it.snippet)}</span>` : ''}</span></span>` +
+        `<span class="col-size">${it.isDir ? '—' : humanSize(it.size)}</span>` +
+        `<span class="col-perm">${esc(it.perms || '')}</span>` +
+        `<span class="col-owner">${esc(String(it.owner ?? ''))}</span>` +
+        `<span class="col-date">${fmtDate(it.mtime)}</span>`;
+    }
     row.addEventListener('click', (e) => onRowClick(e, it, list));
     row.addEventListener('dblclick', () => openItem(it));
     row.addEventListener('contextmenu', (e) => {
@@ -441,6 +462,13 @@ function renderList() {
   }
   updateSelUI(list);
 }
+
+$('btnViewMode').addEventListener('click', () => {
+  S.view = S.view === 'grid' ? 'list' : 'grid';
+  localStorage.setItem('fx-viewmode', S.view);
+  $('btnViewMode').textContent = S.view === 'grid' ? '☰' : '▦';
+  renderList();
+});
 
 function onRowClick(e, it, list) {
   if (e.ctrlKey || e.metaKey) {
@@ -510,26 +538,35 @@ $('filterInput').addEventListener('keydown', async (e) => {
   if (e.key !== 'Enter') return;
   const qy = $('filterInput').value.trim();
   if (!qy) return;
-  toast('Searching under ' + S.cwd + '…');
+  runSearch(qy, 'name');
+});
+
+async function runSearch(qy, mode) {
+  toast((mode === 'content' ? 'Searching file contents under ' : 'Searching under ') + S.cwd + '…');
   try {
-    const results = await api('search?base=' + encodeURIComponent(S.cwd) + '&q=' + encodeURIComponent(qy));
+    const results = await api('search?base=' + encodeURIComponent(S.cwd) + '&q=' + encodeURIComponent(qy) + '&mode=' + mode);
     S.searchMode = true;
-    S.items = results.map(p => ({
-      name: pbase(p), fullPath: p, size: 0, mtime: 0,
-      isDir: false, isLink: false, perms: '', owner: ''
+    S.lastSearch = { q: qy, mode, base: S.cwd };
+    S.items = results.map(r => ({
+      name: pbase(r.path), fullPath: r.path, snippet: r.snippet || '',
+      size: 0, mtime: 0, isDir: false, isLink: false, perms: '', owner: ''
     }));
     S.sel.clear(); S.filter = ''; $('filterInput').value = '';
     $('searchBanner').classList.remove('hidden');
-    $('searchBannerText').textContent = `🔍 ${results.length} result(s) for “${qy}” under ${S.cwd}`;
+    $('searchBannerText').innerHTML =
+      `🔍 ${results.length} result(s) for “${esc(qy)}” in ${mode === 'content' ? 'file contents' : 'file names'} under ${esc(S.cwd)} · ` +
+      `<a href="#" id="searchModeSwap">${mode === 'content' ? 'search names instead' : 'search inside files instead'}</a>`;
+    const swap = document.getElementById('searchModeSwap');
+    if (swap) swap.onclick = (ev) => { ev.preventDefault(); runSearch(qy, mode === 'content' ? 'name' : 'content'); };
     renderList();
   } catch (err) { toast('Search failed: ' + err.message, 'err'); }
-});
+}
 $('btnCloseSearch').addEventListener('click', refresh);
 
 $('chkHidden').addEventListener('change', () => { S.showHidden = $('chkHidden').checked; renderList(); });
 
 /* ---------- modals ---------- */
-const ALL_MODALS = ['modalInput', 'modalConfirm', 'modalEditor', 'modalChmod', 'modalProps', 'modalViewer', 'modalViews', 'modalTools'];
+const ALL_MODALS = ['modalInput', 'modalConfirm', 'modalEditor', 'modalChmod', 'modalProps', 'modalViewer', 'modalViews', 'modalTools', 'modalTrash', 'modalGit'];
 function openModal(id) {
   $('modalBack').classList.remove('hidden');
   ALL_MODALS.forEach(m => $(m).classList.toggle('hidden', m !== id));
@@ -595,18 +632,32 @@ function doRename() {
   }, 'Rename');
 }
 
-function doDelete() {
+async function doTrash() {
+  const paths = selectedPaths();
+  if (!paths.length) return;
+  try {
+    const r = await api('trash', { paths });
+    refresh();
+    toastUndo(`${paths.length} item(s) moved to Trash`, async () => {
+      await api('trash/restore', { ids: r.ids });
+      refresh();
+      toast('Restored', 'ok', 1800);
+    });
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+function doDeletePermanent() {
   const paths = selectedPaths();
   if (!paths.length) return;
   confirmModal(
-    `Delete ${paths.length} item(s)?`,
-    paths.slice(0, 6).map(pbase).join(', ') + (paths.length > 6 ? ` … and ${paths.length - 6} more` : '') + '\nThis cannot be undone.',
+    `Permanently delete ${paths.length} item(s)?`,
+    paths.slice(0, 6).map(pbase).join(', ') + (paths.length > 6 ? ` … and ${paths.length - 6} more` : '') + '\nThis skips the Trash and cannot be undone.',
     async () => {
       await api('delete', { paths });
-      toast('Deleted', 'ok'); refresh();
+      toast('Deleted permanently', 'ok'); refresh();
     });
 }
-$('actDelete').addEventListener('click', doDelete);
+$('actDelete').addEventListener('click', doTrash);
 
 function doCopy(cut) {
   const paths = selectedPaths();
@@ -796,27 +847,38 @@ function uploadOne(file, dir, rel, onProgress) {
 
 let lastRender = 0;
 function setTransfer(id, t) {
-  S.transfers.set(id, t);
+  const prev = S.transfers.get(id);
   const now = Date.now();
+  t._ts = now;
+  if (prev && t.state === 'active' && prev._ts) {
+    const dt = (now - prev._ts) / 1000;
+    if (dt > 0.05) t.speed = Math.max(0, (t.done - prev.done) / dt);
+    else t.speed = prev.speed;
+  }
+  S.transfers.set(id, t);
   if (t.state === 'active' && now - lastRender < 120) return;
   lastRender = now;
   renderTransfers();
 }
 
 $('actDownload').addEventListener('click', doDownload);
+function clickDownload(href) {
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
 async function doDownload() {
-  const paths = selectedPaths();
-  if (!paths.length) return;
-  toast(`Starting ${paths.length} download(s) — check your browser downloads`, 'ok');
-  for (let i = 0; i < paths.length; i++) {
-    setTimeout(() => {
-      const a = document.createElement('a');
-      a.href = '/api/download?path=' + encodeURIComponent(paths[i]);
-      a.download = '';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    }, i * 600);
+  const items = selectedItems();
+  if (!items.length) return;
+  if (items.length === 1 || S.searchMode) {
+    toast(`Starting ${items.length} download(s) — check your browser downloads`, 'ok');
+    selectedPaths().forEach((p, i) => setTimeout(() => clickDownload('/api/download?path=' + encodeURIComponent(p)), i * 600));
+  } else {
+    toast(`Bundling ${items.length} items into one archive…`, 'ok');
+    clickDownload('/api/download-multi?base=' + encodeURIComponent(S.cwd) + '&names=' + encodeURIComponent(JSON.stringify(items.map(i => i.name))));
   }
 }
 
@@ -831,7 +893,7 @@ function renderTransfers() {
     const pct = t.total ? Math.min(100, Math.round(t.done / t.total * 100)) : (t.state === 'done' ? 100 : 0);
     const stat = t.state === 'error' ? `failed: ${esc(t.error || '')}`
       : t.state === 'done' ? 'done'
-      : `${humanSize(t.done)} / ${humanSize(t.total)} · ${pct}%`;
+      : `${humanSize(t.done)} / ${humanSize(t.total)} · ${pct}%${t.speed ? ' · ' + humanSize(t.speed) + '/s' : ''}`;
     return `<div class="t-item">
       <div class="t-top"><span>${t.dir === 'up' ? '⬆' : '⬇'}</span><span class="t-name">${esc(t.name)}</span>
         <span class="t-stat ${t.state === 'error' ? 'err' : ''}">${stat}</span></div>
@@ -902,10 +964,31 @@ $('actConsole').addEventListener('click', () => {
 });
 $('closeConsole').addEventListener('click', () => $('panelConsole').classList.add('hidden'));
 $('btnClearConsole').addEventListener('click', () => { $('consoleOut').textContent = ''; });
+const conHist = [];
+let conHistIdx = -1;
 $('consoleInput').addEventListener('keydown', async (e) => {
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (conHist.length) {
+      conHistIdx = conHistIdx < 0 ? conHist.length - 1 : Math.max(0, conHistIdx - 1);
+      $('consoleInput').value = conHist[conHistIdx];
+    }
+    return;
+  }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (conHistIdx >= 0) {
+      conHistIdx++;
+      if (conHistIdx >= conHist.length) { conHistIdx = -1; $('consoleInput').value = ''; }
+      else $('consoleInput').value = conHist[conHistIdx];
+    }
+    return;
+  }
   if (e.key !== 'Enter') return;
   const cmd = $('consoleInput').value.trim();
   if (!cmd) return;
+  conHist.push(cmd);
+  conHistIdx = -1;
   $('consoleInput').value = '';
   const out = $('consoleOut');
   out.textContent += `\n${S.cwd} $ ${cmd}\n`;
@@ -940,16 +1023,25 @@ function showCtxMenu(x, y) {
   if (S.clipboard && !S.searchMode) entries.push(['📥', `Paste (${S.clipboard.paths.length})`, doPaste]);
   if (items.length) {
     if (!S.searchMode) entries.push(['🗜️', 'Compress…', doCompress]);
+    if (one) entries.push(['🔗', 'Share link…', doShare]);
     entries.push(null);
     if (one) entries.push(['🏷️', 'Rename (F2)', doRename]);
+    if (one && !S.searchMode) entries.push(['🧬', 'Duplicate', doDuplicate]);
+    if (one) entries.push(['📎', 'Copy path', () => {
+      const p = one.fullPath || pjoin(S.cwd, one.name);
+      navigator.clipboard.writeText(p).then(() => toast('Path copied: ' + p, 'ok', 2000));
+    }]);
+    if (one && one.isDir) entries.push(['📊', 'Folder sizes', () => openSizes(one.fullPath || pjoin(S.cwd, one.name))]);
     if (one) entries.push(['🔐', 'Permissions…', openChmod]);
     if (one) entries.push(['ℹ️', 'Properties', openProps]);
     entries.push(null);
-    entries.push(['🗑', 'Delete', doDelete, 'danger']);
+    entries.push(['🗑', 'Move to Trash (Del)', doTrash]);
+    entries.push(['✖', 'Delete permanently', doDeletePermanent, 'danger']);
   } else {
     entries.push(['📁', 'New folder', () => $('actNewFolder').click()]);
     entries.push(['📄', 'New file', () => $('actNewFile').click()]);
     if (S.clipboard) entries.push(['📥', `Paste (${S.clipboard.paths.length})`, doPaste]);
+    entries.push(['📊', 'Analyze folder sizes', () => openSizes(S.cwd)]);
     entries.push(['⟳', 'Refresh', refresh]);
   }
   menu.innerHTML = '';
@@ -997,7 +1089,8 @@ document.addEventListener('keydown', (e) => {
 
   if (e.key === 'F5') { e.preventDefault(); refresh(); }
   else if (e.key === 'F2') { e.preventDefault(); doRename(); }
-  else if (e.key === 'Delete') { e.preventDefault(); doDelete(); }
+  else if (e.key === 'Delete' && e.shiftKey) { e.preventDefault(); doDeletePermanent(); }
+  else if (e.key === 'Delete') { e.preventDefault(); doTrash(); }
   else if (e.key === 'Backspace') { e.preventDefault(); if (S.cwd !== '/') go(pparent(S.cwd)); }
   else if (e.key === 'Enter') { const it = selectedItems()[0]; if (it) openItem(it); }
   else if (e.ctrlKey && e.key === 'a') { e.preventDefault(); visibleItems().forEach(i => S.sel.add(i.name)); renderList(); }
@@ -1104,6 +1197,7 @@ async function openViewer(v, it) {
   $('vwName').textContent = it.name;
   $('vwIcon').textContent = v.icon;
   $('vwInfo').textContent = full + (it.size ? ' · ' + humanSize(it.size) : '');
+  $('vwDownload').classList.remove('hidden');
   $('vwDownload').onclick = () => {
     const a = document.createElement('a');
     a.href = '/api/download?path=' + encodeURIComponent(full);
@@ -1471,5 +1565,316 @@ TABS.domains = async (el) => {
   };
 };
 
+/* ══════════ v1.2 — trash, shares, git, palette, sizes, docker ══════════ */
+
+function toastUndo(msg, undoFn) {
+  const t = document.createElement('div');
+  t.className = 'toast ok toast-undo';
+  t.innerHTML = `<span>${esc(msg)}</span><button class="btn sm">↩ Undo</button>`;
+  t.querySelector('button').addEventListener('click', async () => {
+    t.remove();
+    try { await undoFn(); } catch (e) { toast(e.message, 'err'); }
+  });
+  $('toasts').appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; t.style.transition = '0.3s'; setTimeout(() => t.remove(), 350); }, 7000);
+}
+
+/* ---------- duplicate & share ---------- */
+async function doDuplicate() {
+  const items = selectedItems();
+  if (items.length !== 1) return;
+  try {
+    const r = await api('duplicate', { path: pjoin(S.cwd, items[0].name) });
+    toast('Duplicated as ' + r.name, 'ok'); refresh();
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+function doShare() {
+  const items = selectedItems();
+  if (items.length !== 1) return;
+  const full = items[0].fullPath || pjoin(S.cwd, items[0].name);
+  promptModal(`Share “${items[0].name}” — link expires in hours (0 = never)`, '24', async (v) => {
+    const r = await api('share/create', { path: full, hours: parseFloat(v) || 0 });
+    const url = location.origin + r.url;
+    try { await navigator.clipboard.writeText(url); toast('Share link copied to clipboard 🔗', 'ok', 5000); }
+    catch (e) { toast('Share link: ' + url, 'ok', 10000); }
+  }, 'Create link');
+}
+
+/* ---------- trash ---------- */
+$('plTrash').addEventListener('click', openTrash);
+async function openTrash() {
+  openModal('modalTrash');
+  const box = $('trashList');
+  box.innerHTML = '<div class="muted" style="padding:16px">Loading…</div>';
+  try {
+    const list = await api('trash/list');
+    if (!list.length) {
+      box.innerHTML = '<div class="muted" style="padding:16px;text-align:center">🗑 Trash is empty</div>';
+      return;
+    }
+    box.innerHTML = '';
+    for (const en of list) {
+      const row = document.createElement('div');
+      row.className = 'view-row';
+      row.innerHTML = `<span class="v-ic">🗑</span>
+        <span class="v-info"><b>${esc(en.name)}</b><br/>
+          <span class="muted">${esc(en.orig)} · ${fmtDate(en.at)}</span></span>
+        <button class="btn sm" data-r="${en.id}">↩ Restore</button>
+        <button class="btn sm danger-ghost" data-p="${en.id}">✖</button>`;
+      row.querySelector('[data-r]').addEventListener('click', async () => {
+        await api('trash/restore', { ids: [en.id] });
+        toast('Restored to ' + en.orig, 'ok'); refresh(); openTrash();
+      });
+      row.querySelector('[data-p]').addEventListener('click', async () => {
+        await api('trash/purge', { ids: [en.id] });
+        openTrash();
+      });
+      box.appendChild(row);
+    }
+  } catch (err) { box.innerHTML = `<div class="muted" style="padding:16px">⚠ ${esc(err.message)}</div>`; }
+}
+$('btnEmptyTrash').addEventListener('click', () =>
+  confirmModal('Empty trash?', 'All trashed items are permanently deleted.', async () => {
+    await api('trash/purge', { all: true });
+    toast('Trash emptied', 'ok');
+    openTrash();
+  }, 'Empty'));
+
+/* ---------- folder size analyzer ---------- */
+async function openSizes(dirPath) {
+  $('vwIcon').textContent = '📊';
+  $('vwName').textContent = 'Folder sizes — ' + (pbase(dirPath) || '/');
+  $('vwInfo').textContent = dirPath;
+  $('vwEdit').classList.add('hidden');
+  $('vwDownload').classList.add('hidden');
+  const body = $('vwBody');
+  body.innerHTML = '<div class="muted" style="padding:30px">Calculating sizes… (large folders take a moment)</div>';
+  openModal('modalViewer');
+  try {
+    const rows = await api('du?path=' + encodeURIComponent(dirPath));
+    if (!rows.length) { body.innerHTML = '<div class="muted" style="padding:30px">No data (is du available?)</div>'; return; }
+    const total = rows.find(r => r.path === dirPath) || rows[0];
+    const subs = rows.filter(r => r.path !== dirPath && r.path !== total.path);
+    body.innerHTML = `<div class="du-list">
+      <div class="du-total">Total: <b>${humanSize(total.size)}</b></div>
+      ${subs.map(r => {
+        const pct = total.size ? Math.round(r.size / total.size * 100) : 0;
+        return `<div class="du-row" data-p="${esc(r.path)}">
+          <span class="du-name">📁 ${esc(pbase(r.path))}</span>
+          <div class="du-bar"><div class="du-fill" style="width:${pct}%"></div></div>
+          <span class="du-size">${humanSize(r.size)}</span>
+        </div>`;
+      }).join('')}
+    </div>`;
+    body.querySelectorAll('.du-row').forEach(row =>
+      row.addEventListener('dblclick', () => { closeModal(); go(row.dataset.p); }));
+  } catch (err) { body.innerHTML = `<div class="muted" style="padding:30px">⚠ ${esc(err.message)}</div>`; }
+}
+
+/* ---------- git ---------- */
+async function updateGitChip() {
+  const chip = $('gitChip');
+  try {
+    const g = await api('git/info?path=' + encodeURIComponent(S.cwd));
+    if (g.repo) {
+      S.git = g;
+      chip.textContent = `⎇ ${g.branch || 'detached'}${g.changes ? ' ±' + g.changes : ''}`;
+      chip.classList.remove('hidden');
+    } else { S.git = null; chip.classList.add('hidden'); }
+  } catch (e) { chip.classList.add('hidden'); }
+}
+$('gitChip').addEventListener('click', openGit);
+async function openGit() {
+  if (!S.git) return;
+  const g = S.git;
+  $('gitBranch').textContent = (g.branch || 'detached') + ' · ' + g.root;
+  $('gitSb').textContent = g.sb;
+  $('gitBody').textContent =
+    (g.status ? '── Changes ──\n' + g.status + '\n\n' : '── Working tree clean ──\n\n') +
+    (g.log ? '── Recent commits ──\n' + g.log : '');
+  openModal('modalGit');
+  const act = (action) => async () => {
+    $('gitBody').textContent = action + ' running…';
+    try {
+      const r = await api('git/action', { path: S.cwd, action });
+      $('gitBody').textContent = r.output || '(done)';
+      toast(action + (r.code === 0 ? ' complete' : ' finished with errors'), r.code === 0 ? 'ok' : 'err');
+      await updateGitChip();
+      refresh();
+    } catch (err) { $('gitBody').textContent = '✗ ' + err.message; }
+  };
+  $('gitPull').onclick = act('pull');
+  $('gitFetch').onclick = act('fetch');
+}
+
+/* ---------- command palette (Ctrl+K) ---------- */
+let palIdx = 0, palItems = [];
+$('btnPalette').addEventListener('click', openPalette);
+
+function paletteSources() {
+  const src = [];
+  const act = (icon, label, run) => src.push({ icon, label, run, kind: 'Action' });
+  act('📁', 'New folder', () => $('actNewFolder').click());
+  act('📄', 'New file', () => $('actNewFile').click());
+  act('⬆', 'Upload files', () => $('pickFiles').click());
+  act('⬆', 'Upload folder', () => $('pickFolder').click());
+  act('⟳', 'Refresh', refresh);
+  act('👁', 'Toggle hidden files', () => { $('chkHidden').checked = !$('chkHidden').checked; S.showHidden = $('chkHidden').checked; renderList(); });
+  act('▦', 'Toggle grid / list view', () => $('btnViewMode').click());
+  act('＞_', 'Open console', () => $('actConsole').click());
+  act('⇅', 'Open transfers', () => $('actTransfers').click());
+  act('🧩', 'Views — preview add-ons', () => $('btnViews').click());
+  act('🗑', 'Open Trash', openTrash);
+  act('📎', 'Copy current path', () => navigator.clipboard.writeText(S.cwd).then(() => toast('Path copied', 'ok', 1500)));
+  act('📊', 'Analyze folder sizes here', () => openSizes(S.cwd));
+  for (const [tab, label] of [['overview', 'Overview'], ['services', 'Services'], ['processes', 'Processes'], ['ports', 'Ports'], ['cron', 'Cron'], ['domains', 'Domains'], ['docker', 'Docker'], ['shares', 'Share links']]) {
+    src.push({ icon: '🧰', label: 'Tools: ' + label, kind: 'Tools', run: () => { openModal('modalTools'); showTab(tab); } });
+  }
+  for (const [ic, label, fn] of PLACES) src.push({ icon: ic, label: 'Go to ' + label, kind: 'Place', run: () => go(fn()) });
+  for (const b of getBookmarks()) src.push({ icon: '⭐', label: b, kind: 'Bookmark', run: () => go(b) });
+  for (const it of S.items.slice(0, 80)) {
+    src.push({
+      icon: iconFor(it), label: it.name, kind: it.isDir ? 'Folder' : 'File',
+      run: () => openItem(it)
+    });
+  }
+  return src;
+}
+
+function openPalette() {
+  $('palette').classList.remove('hidden');
+  const inp = $('palInput');
+  inp.value = '';
+  renderPalette('');
+  setTimeout(() => inp.focus(), 20);
+}
+function closePalette() { $('palette').classList.add('hidden'); $('fileList').focus(); }
+
+function renderPalette(qy) {
+  const all = paletteSources();
+  const f = qy.toLowerCase();
+  palItems = f
+    ? all.filter(i => i.label.toLowerCase().includes(f)).slice(0, 14)
+    : all.slice(0, 14);
+  if (qy.startsWith('/')) palItems.unshift({ icon: '➜', label: 'Go to path: ' + qy, kind: 'Path', run: () => go(qy.replace(/\/+$/, '') || '/') });
+  palIdx = 0;
+  $('palList').innerHTML = palItems.map((i, n) => `
+    <div class="pal-item ${n === palIdx ? 'active' : ''}" data-i="${n}">
+      <span class="pal-ic">${i.icon}</span>
+      <span class="pal-label">${esc(i.label)}</span>
+      <span class="pal-kind">${i.kind}</span>
+    </div>`).join('') || '<div class="muted" style="padding:14px">No matches</div>';
+  $('palList').querySelectorAll('.pal-item').forEach(el =>
+    el.addEventListener('click', () => { closePalette(); palItems[+el.dataset.i].run(); }));
+}
+
+$('palInput').addEventListener('input', () => renderPalette($('palInput').value.trim()));
+$('palInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { closePalette(); return; }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    if (palItems[palIdx]) { closePalette(); palItems[palIdx].run(); }
+    return;
+  }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    palIdx = e.key === 'ArrowDown' ? Math.min(palItems.length - 1, palIdx + 1) : Math.max(0, palIdx - 1);
+    $('palList').querySelectorAll('.pal-item').forEach((el, n) => el.classList.toggle('active', n === palIdx));
+    const act = $('palList').querySelector('.pal-item.active');
+    if (act) act.scrollIntoView({ block: 'nearest' });
+  }
+});
+$('palette').addEventListener('mousedown', (e) => { if (e.target === $('palette')) closePalette(); });
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    if ($('screen-fm').classList.contains('hidden')) return;
+    e.preventDefault();
+    if ($('palette').classList.contains('hidden')) openPalette();
+    else closePalette();
+  }
+});
+
+/* ---------- tools: docker & shares tabs ---------- */
+TABS.docker = async (el) => {
+  const d = await api('docker/ps');
+  if (!d.installed) {
+    el.innerHTML = `<div class="muted" style="padding:24px">🐳 Docker is not installed on this server.<br/><br/>
+      Install it from the Console with:<br/><code>curl -fsSL https://get.docker.com | sh</code></div>`;
+    return;
+  }
+  el.innerHTML = `<div class="tool-bar"><span class="muted">${d.containers.length} container(s)</span><span class="spacer"></span>
+      <button id="dkRefresh" class="btn sm">⟳ Refresh</button></div>
+    <div class="ttable-wrap"><table class="ttable"><thead><tr><th style="width:20px"></th><th>Name</th><th>Image</th><th>Status</th><th>Ports</th><th style="width:190px">Actions</th></tr></thead>
+    <tbody>${d.containers.map(c => `<tr>
+      <td><span class="dot ${/^Up/.test(c.status) ? 'on' : 'err'}"></span></td>
+      <td class="mono">${esc(c.name)}</td>
+      <td class="dim">${esc(c.image.slice(0, 36))}</td>
+      <td class="dim">${esc(c.status.slice(0, 30))}</td>
+      <td class="dim mono" style="font-size:11px">${esc(c.ports.slice(0, 40))}</td>
+      <td>
+        <button class="btn sm" data-a="start" data-id="${esc(c.id)}" title="Start">▶</button>
+        <button class="btn sm" data-a="stop" data-id="${esc(c.id)}" title="Stop">■</button>
+        <button class="btn sm" data-a="restart" data-id="${esc(c.id)}" title="Restart">⟳</button>
+        <button class="btn sm" data-a="logs" data-id="${esc(c.id)}" title="Logs">📜</button>
+        <button class="btn sm danger-ghost" data-a="rm" data-id="${esc(c.id)}" title="Remove">✖</button>
+      </td></tr>`).join('')}</tbody></table></div>
+    <pre id="dkLogs" class="tool-pre hidden"></pre>`;
+  el.querySelector('#dkRefresh').onclick = () => TABS.docker(el);
+  el.onclick = async (e) => {
+    const b = e.target.closest('button[data-a]');
+    if (!b) return;
+    const id = b.dataset.id, a = b.dataset.a;
+    if (a === 'logs') {
+      const lg = el.querySelector('#dkLogs');
+      lg.classList.remove('hidden');
+      lg.textContent = 'Loading logs…';
+      try { const r = await api('docker/logs?id=' + encodeURIComponent(id)); lg.textContent = r.text; }
+      catch (err) { lg.textContent = '⚠ ' + err.message; }
+      lg.scrollTop = lg.scrollHeight;
+      return;
+    }
+    if (a === 'rm') {
+      confirmModal('Remove container?', 'docker rm -f ' + id, async () => {
+        await api('docker/action', { id, action: 'rm' });
+        toast('Container removed', 'ok');
+        openModal('modalTools'); TABS.docker(el);
+      }, 'Remove');
+      return;
+    }
+    b.disabled = true;
+    try { await api('docker/action', { id, action: a }); toast(a + ': done', 'ok'); TABS.docker(el); }
+    catch (err) { toast(err.message, 'err'); b.disabled = false; }
+  };
+};
+
+TABS.shares = async (el) => {
+  const list = await api('share/list');
+  el.innerHTML = `<p class="muted" style="margin-bottom:10px;font-size:12.5px">Public download links — anyone with the link can download the file, no login needed. Create one by right-clicking a file → <b>Share link…</b></p>
+    <div class="dom-list">${list.length ? list.map(s => `
+      <div class="dom-item ${s.expired ? 'expired' : ''}">
+        <span class="dom-name">🔗 ${esc(s.name)}</span>
+        <span class="muted" style="font-size:11.5px">${esc(s.path)}</span>
+        <span class="badge ${s.expired ? '' : 'ok'}">${s.expired ? 'expired' : s.expires ? 'until ' + fmtDate(s.expires) : 'no expiry'}</span>
+        <span class="spacer"></span>
+        <button class="btn sm" data-copy="${esc(s.token)}">📋 Copy link</button>
+        <button class="btn sm danger-ghost" data-rev="${esc(s.token)}">Revoke</button>
+      </div>`).join('') : '<div class="muted" style="padding:14px">No share links yet.</div>'}</div>`;
+  el.onclick = async (e) => {
+    const cp = e.target.closest('button[data-copy]');
+    const rv = e.target.closest('button[data-rev]');
+    if (cp) {
+      const url = location.origin + '/s/' + cp.dataset.copy;
+      try { await navigator.clipboard.writeText(url); toast('Link copied', 'ok', 2000); }
+      catch (err) { toast(url, '', 8000); }
+    } else if (rv) {
+      await api('share/revoke', { token: rv.dataset.rev });
+      toast('Link revoked', 'ok');
+      TABS.shares(el);
+    }
+  };
+};
+
 /* ---------- init ---------- */
+$('btnViewMode').textContent = S.view === 'grid' ? '☰' : '▦';
 boot();

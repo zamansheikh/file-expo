@@ -44,6 +44,18 @@ Re-run the install command — your password and settings are kept.
 curl -fsSL https://raw.githubusercontent.com/zamansheikh/file-expo/main/install.sh | sudo bash -s -- --uninstall
 ```
 
+## 🆕 What's new in v1.2
+
+- **🗑 Trash with Undo** — Delete moves items to a server-side Trash and shows an *Undo* toast. Restore or purge from the Trash panel (sidebar). `Shift+Del` = permanent delete.
+- **🔗 Share links** — right-click a file → *Share link…* → get a public download URL (with optional expiry) you can send to anyone, no login needed. Manage links in Tools → Shares.
+- **⌘K Command palette** — press `Ctrl+K`: run any action, jump to places/bookmarks/files, or type a `/path` to go there.
+- **▦ Grid view** — toggle list/grid; images show real thumbnails.
+- **🔍 Content search** — search inside files (grep) with matched-line snippets, one click to switch between name/content search.
+- **🐳 Docker** tab — containers with status, start/stop/restart/remove, logs.
+- **⎇ Git aware** — a branch chip appears when the folder is a git repo; click it for status, recent commits, Pull and Fetch.
+- **📊 Folder size analyzer** — right-click → *Folder sizes* for a du-based bar breakdown; double-click a row to dive in.
+- Multi-select **Download as one archive**, Duplicate file, Copy path, console history (`↑`/`↓`), live transfer speed.
+
 ## 🆕 What's new in v1.1
 
 - **🧩 Views** — installable preview add-ons: image viewer, video player (with seeking), audio player, PDF viewer, Markdown preview, CSV table, JSON formatter, hex viewer. Open **🧩 Views** in the topbar and install the ones you want.
