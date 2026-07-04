@@ -14,7 +14,7 @@ const os = require('os');
 const CONF_DIR = process.env.FILE_EXPO_CONF || '/etc/file-expo';
 const CONF_FILE = path.join(CONF_DIR, 'config.json');
 const PUB = path.join(__dirname, 'public');
-const VERSION = '1.2.0';
+const VERSION = '1.2.1';
 const REPO = 'zamansheikh/file-expo';
 const BRANCH = 'main';
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -708,6 +708,26 @@ async function handleApi(req, res, u) {
     }
   }
 
+  if (route === 'changelog') {
+    const out = [];
+    const dir = path.join(APP_ROOT, 'changelog');
+    const files = (await fsp.readdir(dir).catch(() => [])).filter(f => /^\d+\.\d+\.\d+\.md$/.test(f));
+    for (const f of files) {
+      out.push({ version: f.replace(/\.md$/, ''), content: await fsp.readFile(path.join(dir, f), 'utf8') });
+    }
+    // if a newer version exists on GitHub, pull its changelog too so users see what's coming
+    try {
+      const chk = await fetchUrl(`https://raw.githubusercontent.com/${REPO}/${BRANCH}/version.json`);
+      const latest = String((JSON.parse(chk.body) || {}).version || '').trim();
+      if (latest && semverGt(latest, VERSION) && !out.find(o => o.version === latest)) {
+        const md = await fetchUrl(`https://raw.githubusercontent.com/${REPO}/${BRANCH}/changelog/${latest}.md`);
+        if (md.status === 200) out.push({ version: latest, content: md.body, isNew: true });
+      }
+    } catch (e) {}
+    out.sort((a, b) => semverGt(a.version, b.version) ? -1 : 1);
+    return json(res, 200, out);
+  }
+
   if (route === 'update/run' && req.method === 'POST') {
     const scriptPath = path.join(os.tmpdir(), 'fx-update.sh');
     fs.writeFileSync(scriptPath, UPDATE_SCRIPT, { mode: 0o755 });
@@ -973,6 +993,7 @@ server.listen(conf.port, '0.0.0.0', () => {
   console.log(`File Expo v${VERSION} listening on port ${conf.port}`);
   const nets = os.networkInterfaces();
   for (const name of Object.keys(nets)) {
+    if (/^(docker|br-|veth|virbr|lo)/.test(name)) continue;
     for (const n of nets[name] || []) {
       if (n.family === 'IPv4' && !n.internal) {
         console.log(`  → http://${n.address}:${conf.port}${conf.configured ? '' : '/?token=' + conf.setupToken}`);

@@ -104,7 +104,7 @@
   <div class="topbar">
     <span class="brand">🗄️ File Expo</span>
     <span id="connInfo" class="conn-chip"></span>
-    <span id="verChip" class="ver-chip"></span>
+    <button id="verChip" class="ver-chip" title="What's new — changelog"></button>
     <button id="btnUpdate" class="btn sm primary hidden">⬆ Update</button>
     <span class="spacer"></span>
     <button id="btnTools" class="btn sm ghost">🧰 Tools</button>
@@ -279,6 +279,16 @@
     <p class="muted" style="margin-bottom:12px;font-size:12.5px">Install views to preview more file types right in the explorer.</p>
     <div id="viewsList" class="views-list"></div>
     <div class="m-actions"><button class="btn primary" data-close>Done</button></div>
+  </div>
+
+  <div id="modalChangelog" class="modal hidden" style="width:680px;max-height:84vh;display:flex;flex-direction:column">
+    <h3>📋 What's new</h3>
+    <div id="clBody" class="cl-body"></div>
+    <div class="m-actions">
+      <button id="clUpdate" class="btn primary hidden">⬆ Update now</button>
+      <span class="spacer"></span>
+      <button class="btn" data-close>Close</button>
+    </div>
   </div>
 
   <div id="modalTrash" class="modal hidden" style="width:640px">

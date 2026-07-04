@@ -566,7 +566,7 @@ $('btnCloseSearch').addEventListener('click', refresh);
 $('chkHidden').addEventListener('change', () => { S.showHidden = $('chkHidden').checked; renderList(); });
 
 /* ---------- modals ---------- */
-const ALL_MODALS = ['modalInput', 'modalConfirm', 'modalEditor', 'modalChmod', 'modalProps', 'modalViewer', 'modalViews', 'modalTools', 'modalTrash', 'modalGit'];
+const ALL_MODALS = ['modalInput', 'modalConfirm', 'modalEditor', 'modalChmod', 'modalProps', 'modalViewer', 'modalViews', 'modalTools', 'modalTrash', 'modalGit', 'modalChangelog'];
 function openModal(id) {
   $('modalBack').classList.remove('hidden');
   ALL_MODALS.forEach(m => $(m).classList.toggle('hidden', m !== id));
@@ -1874,6 +1874,34 @@ TABS.shares = async (el) => {
     }
   };
 };
+
+/* ---------- changelog viewer ---------- */
+$('verChip').addEventListener('click', openChangelog);
+async function openChangelog() {
+  openModal('modalChangelog');
+  const box = $('clBody');
+  $('clUpdate').classList.add('hidden');
+  box.innerHTML = '<div class="muted" style="padding:20px">Loading…</div>';
+  try {
+    const list = await api('changelog');
+    if (!list.length) { box.innerHTML = '<div class="muted" style="padding:20px">No changelog entries found.</div>'; return; }
+    const cur = S.sys && S.sys.version;
+    box.innerHTML = list.map(e => `
+      <div class="cl-entry">
+        <div class="cl-head">v${esc(e.version)}
+          ${e.isNew ? '<span class="badge ok">NEW — install via Update</span>' : e.version === cur ? '<span class="badge">current</span>' : ''}
+        </div>
+        <div class="md-render cl-md">${renderMarkdown(e.content)}</div>
+      </div>`).join('');
+    if (list.some(e => e.isNew)) {
+      const btn = $('clUpdate');
+      btn.classList.remove('hidden');
+      btn.onclick = () => { closeModal(); doUpdate(); };
+    }
+  } catch (err) {
+    box.innerHTML = `<div class="muted" style="padding:20px">⚠ ${esc(err.message)}</div>`;
+  }
+}
 
 /* ---------- init ---------- */
 $('btnViewMode').textContent = S.view === 'grid' ? '☰' : '▦';

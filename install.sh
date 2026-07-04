@@ -55,23 +55,22 @@ step() {
   # step "Label" command args...
   local label="$1"; shift
   CURRENT=$((CURRENT + 1))
-  printf "  ${D}[%d/%d]${N} %-42s" "$CURRENT" "$TOTAL" "$label"
   echo "==== [$CURRENT/$TOTAL] $label ====" >>"$LOG"
   "$@" >>"$LOG" 2>&1 &
   local pid=$!
   local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
   local i=0
   while kill -0 $pid 2>/dev/null; do
-    printf "\b${C}%s${N}" "${spin:$((i % 10)):1}"
+    printf "\r  ${D}[%d/%d]${N} %-42s ${C}%s${N} " "$CURRENT" "$TOTAL" "$label" "${spin:$((i % 10)):1}"
     i=$((i + 1))
     sleep 0.15
   done
   wait $pid
   local rc=$?
   if [ $rc -eq 0 ]; then
-    printf "\b${G}✓${N}\n"
+    printf "\r  ${D}[%d/%d]${N} %-42s ${G}✓${N}  \n" "$CURRENT" "$TOTAL" "$label"
   else
-    printf "\b${Y}⚠${N}  ${D}(non-fatal, see $LOG)${N}\n"
+    printf "\r  ${D}[%d/%d]${N} %-42s ${Y}⚠${N}  ${D}(non-fatal, see $LOG)${N}\n" "$CURRENT" "$TOTAL" "$label"
   fi
   return 0
 }
@@ -259,16 +258,33 @@ open_firewall() {
 step "Opening firewall port $PORT" open_firewall
 
 # ── step 8: detect address ────────────────────────────────────
-IP=""
-detect_ip() {
-  IP=$(curl -fsS -m 5 https://api.ipify.org 2>/dev/null) || true
-  [ -n "$IP" ] || IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-  [ -n "$IP" ] || IP="YOUR-SERVER-IP"
-  echo "address: $IP"
+valid_ip() { echo "$1" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'; }
+private_ip() { echo "$1" | grep -Eq '^(10\.|127\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)'; }
+
+get_public_ip() {
+  local ip=""
+  # ask the internet (forced IPv4 so we never get an IPv6 or a proxy answer)
+  for svc in https://api.ipify.org https://checkip.amazonaws.com https://ifconfig.me/ip https://icanhazip.com; do
+    ip=$(curl -4 -fsS -m 5 "$svc" 2>/dev/null | tr -d ' \r\n')
+    valid_ip "$ip" && { echo "$ip"; return 0; }
+  done
+  # source address of the default outbound route (skips docker0 / br-* bridges)
+  ip=$(ip route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \([0-9.]*\).*/\1/p' | head -1)
+  valid_ip "$ip" && { echo "$ip"; return 0; }
+  # first non-private address from hostname -I
+  for cand in $(hostname -I 2>/dev/null); do
+    valid_ip "$cand" && ! private_ip "$cand" && { echo "$cand"; return 0; }
+  done
+  # last resort: first address at all
+  ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+  valid_ip "$ip" && { echo "$ip"; return 0; }
+  echo "YOUR-SERVER-IP"
 }
+
+IP=""
+detect_ip() { IP=$(get_public_ip); echo "address: $IP"; }
 step "Detecting server address" detect_ip
-[ -n "$IP" ] || IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-[ -n "$IP" ] || IP="YOUR-SERVER-IP"
+[ -n "$IP" ] || IP=$(get_public_ip)
 
 progress_bar
 
