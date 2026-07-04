@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>File Expo</title>
+<link rel="stylesheet" href="styles.css" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='0.9em' font-size='90'%3E%F0%9F%97%84%EF%B8%8F%3C/text%3E%3C/svg%3E" />
+</head>
+<body>
+
+<!-- ═══════════ LOADING ═══════════ -->
+<div id="screen-boot" class="screen center-screen">
+  <div class="setup-spinner"></div>
+</div>
+
+<!-- ═══════════ SETUP WELCOME (create password) ═══════════ -->
+<div id="screen-welcome" class="screen center-screen hidden">
+  <div class="card">
+    <div class="logo-big center">🗄️</div>
+    <h1 class="center">Welcome to File Expo</h1>
+    <p class="muted center" style="margin:8px 0 18px">Let's finish installing on <b id="wHost">this server</b></p>
+    <div id="wInfo" class="sys-info"></div>
+    <div class="frow">
+      <label>Create admin password</label>
+      <input id="wPass" type="password" placeholder="at least 6 characters" />
+    </div>
+    <div class="frow">
+      <label>Confirm password</label>
+      <input id="wPass2" type="password" placeholder="repeat it" />
+    </div>
+    <div id="wError" class="conn-error hidden"></div>
+    <button id="wInstall" class="btn primary big wide">🚀 Install File Expo</button>
+  </div>
+</div>
+
+<!-- ═══════════ NO TOKEN ═══════════ -->
+<div id="screen-notoken" class="screen center-screen hidden">
+  <div class="card center">
+    <div class="logo-big">🔑</div>
+    <h1>Setup link required</h1>
+    <p class="muted" style="margin-top:10px">This server isn't configured yet.<br/>
+    Open the full setup link printed by the installer on your server<br/>
+    (it looks like <code>http://your-ip:7777/?token=…</code>),<br/>
+    or run on the server: <code>cat /etc/file-expo/config.json</code></p>
+  </div>
+</div>
+
+<!-- ═══════════ LOGIN ═══════════ -->
+<div id="screen-login" class="screen center-screen hidden">
+  <div class="card" style="width:360px">
+    <div class="logo-big center">🗄️</div>
+    <h1 class="center">File Expo</h1>
+    <p class="muted center" style="margin:6px 0 18px" id="loginHost"></p>
+    <div class="frow">
+      <label>Password</label>
+      <input id="loginPass" type="password" placeholder="••••••••" autofocus />
+    </div>
+    <div id="loginError" class="conn-error hidden"></div>
+    <button id="btnLogin" class="btn primary big wide">🔓 Sign in</button>
+  </div>
+</div>
+
+<!-- ═══════════ SETUP INSTALLER (progress) ═══════════ -->
+<div id="screen-setup" class="screen hidden">
+  <div class="setup-wrap">
+    <div class="setup-head">
+      <div class="setup-spinner" id="setupSpinner"></div>
+      <h1 id="setupTitle">Installing File Expo</h1>
+      <p class="muted" id="setupSub">Finalizing your server — just like an OS installation.</p>
+    </div>
+    <div class="setup-progress">
+      <div class="pbar"><div id="setupBar" class="pbar-fill" style="width:2%"></div></div>
+      <div class="pbar-meta"><span id="setupPct">0%</span><span id="setupStepLabel">Starting…</span></div>
+    </div>
+    <div class="setup-body">
+      <ul id="setupSteps" class="setup-steps">
+        <li data-i="0"><span class="s-ic">○</span> Verifying setup token</li>
+        <li data-i="1"><span class="s-ic">○</span> Probing system</li>
+        <li data-i="2"><span class="s-ic">○</span> Checking tools</li>
+        <li data-i="3"><span class="s-ic">○</span> Securing your password</li>
+        <li data-i="4"><span class="s-ic">○</span> Writing configuration</li>
+        <li data-i="5"><span class="s-ic">○</span> Starting services</li>
+      </ul>
+      <pre id="setupLog" class="setup-log"></pre>
+    </div>
+    <div class="setup-foot">
+      <button id="btnLaunchFM" class="btn primary big hidden">🚀 Open File Manager</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ FILE MANAGER ═══════════ -->
+<div id="screen-fm" class="screen hidden">
+  <div class="topbar">
+    <span class="brand">🗄️ File Expo</span>
+    <span id="connInfo" class="conn-chip"></span>
+    <span class="spacer"></span>
+    <button id="btnDisconnect" class="btn sm danger-ghost">Sign out</button>
+  </div>
+
+  <div class="toolbar">
+    <button id="navBack" class="ibtn" title="Back (Alt+←)">←</button>
+    <button id="navFwd" class="ibtn" title="Forward">→</button>
+    <button id="navUp" class="ibtn" title="Up (Backspace)">↑</button>
+    <button id="navRefresh" class="ibtn" title="Refresh (F5)">⟳</button>
+    <div id="breadcrumb" class="breadcrumb"></div>
+    <input id="pathInput" class="path-input hidden" spellcheck="false" />
+    <input id="filterInput" class="filter-input" placeholder="Filter… (Enter = deep search)" />
+  </div>
+
+  <div class="actionbar">
+    <button id="actUpload" class="btn sm">⬆ Upload files</button>
+    <button id="actUploadFolder" class="btn sm">⬆ Folder</button>
+    <button id="actDownload" class="btn sm" disabled>⬇ Download</button>
+    <span class="vsep"></span>
+    <button id="actNewFolder" class="btn sm">📁+ New folder</button>
+    <button id="actNewFile" class="btn sm">📄+ New file</button>
+    <span class="vsep"></span>
+    <button id="actDelete" class="btn sm danger-ghost" disabled>🗑 Delete</button>
+    <span class="spacer"></span>
+    <label class="chk"><input type="checkbox" id="chkHidden" /> Hidden files</label>
+    <button id="actConsole" class="btn sm ghost">＞_ Console</button>
+    <button id="actTransfers" class="btn sm ghost">⇅ Transfers <span id="transferCount" class="cnt hidden">0</span></button>
+  </div>
+
+  <div class="fm-main">
+    <aside class="sidebar">
+      <h4>Places</h4>
+      <div id="places" class="places"></div>
+      <h4>Bookmarks</h4>
+      <div id="bookmarks" class="places"></div>
+      <button id="btnAddBookmark" class="btn sm ghost wide">＋ Bookmark this folder</button>
+    </aside>
+
+    <section class="file-area">
+      <div id="searchBanner" class="search-banner hidden">
+        <span id="searchBannerText"></span>
+        <button id="btnCloseSearch" class="btn sm">✕ Close results</button>
+      </div>
+      <div class="list-head" id="listHead">
+        <span class="col-name sortable" data-k="name">Name <i></i></span>
+        <span class="col-size sortable" data-k="size">Size <i></i></span>
+        <span class="col-perm">Permissions</span>
+        <span class="col-owner">Owner</span>
+        <span class="col-date sortable" data-k="mtime">Modified <i></i></span>
+      </div>
+      <div id="fileList" class="file-list" tabindex="0"></div>
+      <div id="dropHint" class="drop-hint hidden">⬆ Drop to upload here</div>
+    </section>
+  </div>
+
+  <div id="panelTransfers" class="bottom-panel hidden">
+    <div class="bp-head"><b>Transfers</b>
+      <button id="btnClearTransfers" class="btn sm ghost">Clear finished</button>
+      <span class="spacer"></span><button class="ibtn" id="closeTransfers">✕</button>
+    </div>
+    <div id="transferList" class="transfer-list"></div>
+  </div>
+
+  <div id="panelConsole" class="bottom-panel hidden">
+    <div class="bp-head"><b>Console</b> <span class="muted" id="consoleCwd"></span>
+      <span class="spacer"></span>
+      <button id="btnClearConsole" class="btn sm ghost">Clear</button>
+      <button class="ibtn" id="closeConsole">✕</button>
+    </div>
+    <pre id="consoleOut" class="console-out"></pre>
+    <div class="console-in">
+      <span class="prompt">$</span>
+      <input id="consoleInput" spellcheck="false" placeholder="run a command in the current folder…" />
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <span id="statItems"></span>
+    <span id="statSel"></span>
+    <span class="spacer"></span>
+    <span id="statSys" class="muted"></span>
+  </div>
+</div>
+
+<!-- context menu -->
+<div id="ctxMenu" class="ctx hidden"></div>
+
+<!-- hidden file inputs -->
+<input type="file" id="pickFiles" multiple class="hidden" />
+<input type="file" id="pickFolder" webkitdirectory class="hidden" />
+
+<!-- ═══════════ MODALS ═══════════ -->
+<div id="modalBack" class="modal-back hidden">
+
+  <div id="modalInput" class="modal hidden">
+    <h3 id="miTitle">Input</h3>
+    <input id="miValue" spellcheck="false" />
+    <div class="m-actions">
+      <button class="btn" data-close>Cancel</button>
+      <button id="miOk" class="btn primary">OK</button>
+    </div>
+  </div>
+
+  <div id="modalConfirm" class="modal hidden">
+    <h3 id="mcTitle">Confirm</h3>
+    <p id="mcText" class="muted"></p>
+    <div class="m-actions">
+      <button class="btn" data-close>Cancel</button>
+      <button id="mcOk" class="btn danger">Delete</button>
+    </div>
+  </div>
+
+  <div id="modalEditor" class="modal wide hidden">
+    <h3>✏️ <span id="meName"></span> <span id="meDirty" class="muted"></span></h3>
+    <textarea id="meText" spellcheck="false"></textarea>
+    <div class="m-actions">
+      <span class="muted" id="meInfo"></span>
+      <span class="spacer"></span>
+      <button class="btn" data-close>Close</button>
+      <button id="meSave" class="btn primary">💾 Save (Ctrl+S)</button>
+    </div>
+  </div>
+
+  <div id="modalChmod" class="modal hidden">
+    <h3>🔐 Permissions — <span id="chName"></span></h3>
+    <table class="chmod-table">
+      <tr><th></th><th>Read</th><th>Write</th><th>Execute</th></tr>
+      <tr><th>Owner</th><td><input type="checkbox" data-b="8"></td><td><input type="checkbox" data-b="7"></td><td><input type="checkbox" data-b="6"></td></tr>
+      <tr><th>Group</th><td><input type="checkbox" data-b="5"></td><td><input type="checkbox" data-b="4"></td><td><input type="checkbox" data-b="3"></td></tr>
+      <tr><th>Others</th><td><input type="checkbox" data-b="2"></td><td><input type="checkbox" data-b="1"></td><td><input type="checkbox" data-b="0"></td></tr>
+    </table>
+    <div class="frow two" style="margin-top:10px">
+      <div><label>Octal</label><input id="chOctal" maxlength="4" /></div>
+      <div style="display:flex;align-items:flex-end"><label class="chk"><input type="checkbox" id="chRec" /> Recursive</label></div>
+    </div>
+    <div class="m-actions">
+      <button class="btn" data-close>Cancel</button>
+      <button id="chOk" class="btn primary">Apply</button>
+    </div>
+  </div>
+
+  <div id="modalProps" class="modal hidden">
+    <h3>ℹ️ <span id="ppName"></span></h3>
+    <div id="ppBody" class="props"></div>
+    <div class="m-actions"><button class="btn primary" data-close>Close</button></div>
+  </div>
+
+</div>
+
+<div id="toasts" class="toasts"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
