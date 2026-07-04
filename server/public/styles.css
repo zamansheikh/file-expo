@@ -547,3 +547,26 @@ code {
   padding-bottom: 6px; border-bottom: 1px solid var(--line); margin-bottom: 4px;
 }
 .cl-md { padding: 4px 2px !important; font-size: 13px !important; }
+
+/* ══════════ v1.3.1 — tmux ══════════ */
+.tmx-wrap { display: flex; gap: 12px; flex: 1; min-height: 0; }
+.tmx-side { width: 220px; flex-shrink: 0; display: flex; flex-direction: column; gap: 5px; overflow-y: auto; }
+.tmx-sess {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; cursor: pointer;
+}
+.tmx-sess:hover { border-color: var(--acc); }
+.tmx-sess.active { background: var(--sel); border-color: var(--acc); }
+.tmx-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12.5px; }
+.tmx-kill { opacity: 0; }
+.tmx-sess:hover .tmx-kill { opacity: 0.8; }
+.tmx-new { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
+.tmx-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.tmx-pane {
+  flex: 1; background: #05090d; border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px 14px; font-family: var(--mono); font-size: 12px; color: #cfe6cf;
+  white-space: pre-wrap; word-break: break-word; overflow-y: auto; user-select: text; min-height: 0;
+}
+.tmx-input { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.tmx-input .prompt { color: var(--acc2); font-family: var(--mono); }
+.tmx-input input { font-family: var(--mono); font-size: 12.5px; }

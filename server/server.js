@@ -14,7 +14,7 @@ const os = require('os');
 const CONF_DIR = process.env.FILE_EXPO_CONF || '/etc/file-expo';
 const CONF_FILE = path.join(CONF_DIR, 'config.json');
 const PUB = path.join(__dirname, 'public');
-const VERSION = '1.3.0';
+const VERSION = '1.3.1';
 const REPO = 'zamansheikh/file-expo';
 const BRANCH = 'main';
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -627,6 +627,74 @@ async function handleApi(req, res, u) {
     if (!(await hasCmd('npm'))) return json(res, 400, { error: 'npm is not installed — install Node.js with npm first' });
     const r = await run('npm install -g pm2 2>&1', { timeout: 420000 });
     if (!(await hasCmd('pm2'))) return json(res, 400, { error: 'PM2 install failed: ' + (r.stdout + r.stderr).slice(-400) });
+    return json(res, 200, { ok: true });
+  }
+
+  /* ---------- tmux ---------- */
+  if (route === 'tmux/list') {
+    if (!(await hasCmd('tmux'))) return json(res, 200, { installed: false, sessions: [] });
+    const r = await run(`tmux list-sessions -F '#{session_name}|#{session_windows}|#{?session_attached,attached,detached}|#{session_created}' 2>/dev/null`);
+    const sessions = r.stdout.split('\n').filter(Boolean).map(l => {
+      const p = l.split('|');
+      return { name: p[0], windows: parseInt(p[1], 10) || 0, attached: p[2] === 'attached', created: (parseInt(p[3], 10) || 0) * 1000 };
+    });
+    return json(res, 200, { installed: true, sessions });
+  }
+
+  if (route === 'tmux/capture') {
+    const name = P.get('name') || '';
+    if (!/^[\w.-]+$/.test(name)) return json(res, 400, { error: 'Bad session name' });
+    const r = await run(`tmux capture-pane -pt ${q(name)} -S -200 2>&1`, { timeout: 15000 });
+    if (r.code !== 0) return json(res, 400, { error: r.stderr.trim() || r.stdout.trim() || 'capture failed' });
+    return json(res, 200, { text: r.stdout.replace(/\n+$/, '') || '(empty pane)' });
+  }
+
+  if (route === 'tmux/new' && req.method === 'POST') {
+    const b = await readBody(req);
+    const name = String(b.name || '').trim();
+    if (!/^[\w.-]{1,64}$/.test(name)) return json(res, 400, { error: 'Name: letters, numbers, dots, dashes only' });
+    const exists = await run(`tmux has-session -t ${q(name)} 2>/dev/null && echo y`);
+    if (exists.stdout.includes('y')) return json(res, 400, { error: 'A session with that name already exists' });
+    const cwd = b.cwd && String(b.cwd).startsWith('/') ? ` -c ${q(b.cwd)}` : '';
+    const r = await run(`tmux new-session -d -s ${q(name)}${cwd} 2>&1`, { timeout: 15000 });
+    if (r.code !== 0) return json(res, 400, { error: (r.stdout + r.stderr).trim() || 'could not create session' });
+    if (b.command && String(b.command).trim()) {
+      await run(`tmux send-keys -t ${q(name)} ${q(String(b.command).trim())} Enter 2>&1`, { timeout: 15000 });
+    }
+    return json(res, 200, { ok: true });
+  }
+
+  if (route === 'tmux/send' && req.method === 'POST') {
+    const b = await readBody(req);
+    const name = String(b.name || '');
+    if (!/^[\w.-]+$/.test(name)) return json(res, 400, { error: 'Bad session name' });
+    if (b.keys) {
+      // named control keys, e.g. "C-c", "Up", "Enter"
+      const keys = String(b.keys);
+      if (!/^[\w -]+$/.test(keys)) return json(res, 400, { error: 'Bad key sequence' });
+      await run(`tmux send-keys -t ${q(name)} ${keys.split(/\s+/).map(q).join(' ')} 2>&1`, { timeout: 15000 });
+    } else {
+      const line = String(b.command || '');
+      const r = await run(`tmux send-keys -t ${q(name)} ${q(line)} Enter 2>&1`, { timeout: 15000 });
+      if (r.code !== 0) return json(res, 400, { error: (r.stdout + r.stderr).trim() || 'send failed' });
+    }
+    return json(res, 200, { ok: true });
+  }
+
+  if (route === 'tmux/kill' && req.method === 'POST') {
+    const b = await readBody(req);
+    const name = String(b.name || '');
+    if (!/^[\w.-]+$/.test(name)) return json(res, 400, { error: 'Bad session name' });
+    const r = await run(`tmux kill-session -t ${q(name)} 2>&1`, { timeout: 15000 });
+    if (r.code !== 0) return json(res, 400, { error: (r.stdout + r.stderr).trim() || 'kill failed' });
+    return json(res, 200, { ok: true });
+  }
+
+  if (route === 'tmux/install' && req.method === 'POST') {
+    const pm = detectPM();
+    if (!pm || !PM_INSTALL[pm]) return json(res, 400, { error: 'Unknown package manager — install tmux manually' });
+    const r = await run(PM_INSTALL[pm]('tmux'), { timeout: 300000 });
+    if (!(await hasCmd('tmux'))) return json(res, 400, { error: 'tmux install failed: ' + (r.stdout + r.stderr).slice(-400) });
     return json(res, 200, { ok: true });
   }
 

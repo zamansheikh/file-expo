@@ -251,7 +251,7 @@ async function doLogin() {
 }
 
 /* ══════════ file manager ══════════ */
-const CLIENT_VERSION = '1.3.0';
+const CLIENT_VERSION = '1.3.1';
 
 async function enterFileManager() {
   S.sys = await api('sysinfo');
@@ -585,6 +585,7 @@ function closeModal() {
   $('modalBack').classList.add('hidden');
   S.editorPath = null;
   $('vwBody').innerHTML = ''; // stop any playing media
+  if (tabCleanup) { try { tabCleanup(); } catch (e) {} tabCleanup = null; } // stop tmux polling etc.
   $('fileList').focus();
 }
 document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', closeModal));
@@ -1342,7 +1343,10 @@ document.querySelectorAll('#toolsTabs .tab').forEach(t =>
   t.addEventListener('click', () => showTab(t.dataset.tab)));
 
 const TABS = {};
+let tabCleanup = null;
+function setTabCleanup(fn) { tabCleanup = fn; }
 async function showTab(id) {
+  if (tabCleanup) { try { tabCleanup(); } catch (e) {} tabCleanup = null; }
   document.querySelectorAll('#toolsTabs .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === id));
   const el = $('toolsBody');
   el.onclick = null;
@@ -1782,7 +1786,7 @@ function paletteSources() {
   act('🗑', 'Open Trash', openTrash);
   act('📎', 'Copy current path', () => navigator.clipboard.writeText(S.cwd).then(() => toast('Path copied', 'ok', 1500)));
   act('📊', 'Analyze folder sizes here', () => openSizes(S.cwd));
-  for (const [tab, label] of [['overview', 'Overview'], ['services', 'Services'], ['processes', 'Processes'], ['ports', 'Ports'], ['cron', 'Cron'], ['domains', 'Domains'], ['docker', 'Docker'], ['pm2', 'PM2'], ['shares', 'Share links']]) {
+  for (const [tab, label] of [['overview', 'Overview'], ['services', 'Services'], ['processes', 'Processes'], ['ports', 'Ports'], ['cron', 'Cron'], ['domains', 'Domains'], ['docker', 'Docker'], ['pm2', 'PM2'], ['tmux', 'tmux sessions'], ['shares', 'Share links']]) {
     src.push({ icon: '🧰', label: 'Tools: ' + label, kind: 'Tools', run: () => { openModal('modalTools'); showTab(tab); } });
   }
   for (const [ic, label, fn] of PLACES) src.push({ icon: ic, label: 'Go to ' + label, kind: 'Place', run: () => go(fn()) });
@@ -1992,6 +1996,118 @@ TABS.pm2 = async (el) => {
     b.disabled = true;
     try { await api('pm2/action', { id, action: a }); toast(a + ': done', 'ok'); TABS.pm2(el); }
     catch (err) { toast(err.message, 'err'); b.disabled = false; }
+  };
+};
+
+TABS.tmux = async (el) => {
+  const d = await api('tmux/list');
+  if (!d.installed) {
+    el.innerHTML = `<div class="muted" style="padding:24px">🖥️ tmux is not installed on this server.<br/><br/>
+      tmux keeps terminal sessions alive in the background — start a long task, close your browser, come back later and it's still running.<br/><br/>
+      <button id="tmxInstall" class="btn primary">⬇ Install tmux now</button>
+      <span id="tmxMsg" class="muted" style="margin-left:10px"></span></div>`;
+    el.querySelector('#tmxInstall').onclick = async () => {
+      const btn = el.querySelector('#tmxInstall'); btn.disabled = true;
+      el.querySelector('#tmxMsg').textContent = 'Installing tmux…';
+      try { await api('tmux/install', {}); toast('tmux installed 🎉', 'ok'); TABS.tmux(el); }
+      catch (err) { toast(err.message, 'err', 8000); btn.disabled = false; el.querySelector('#tmxMsg').textContent = ''; }
+    };
+    return;
+  }
+  el.innerHTML = `<div class="tool-bar">
+      <span class="muted">${d.sessions.length} session(s)</span>
+      <span class="spacer"></span>
+      <button id="tmxRefresh" class="btn sm">⟳ Refresh</button>
+    </div>
+    <div class="tmx-wrap">
+      <div class="tmx-side">
+        ${d.sessions.map(s => `<div class="tmx-sess" data-s="${esc(s.name)}">
+          <span class="dot ${s.attached ? 'on' : ''}"></span>
+          <span class="tmx-name">${esc(s.name)}</span>
+          <span class="dim" style="font-size:11px">${s.windows}w</span>
+          <button class="btn sm danger-ghost tmx-kill" data-k="${esc(s.name)}" title="Kill session">✖</button>
+        </div>`).join('') || '<div class="muted" style="padding:12px">No sessions yet.</div>'}
+        <div class="tmx-new">
+          <input id="tmxNewName" placeholder="new session name" />
+          <input id="tmxNewCmd" placeholder="command to run (optional)" />
+          <button id="tmxCreate" class="btn primary sm wide">＋ New session</button>
+        </div>
+      </div>
+      <div class="tmx-main">
+        <pre id="tmxPane" class="tmx-pane">Select a session to view its screen.</pre>
+        <div class="tmx-input hidden" id="tmxInputRow">
+          <span class="prompt">▸</span>
+          <input id="tmxSend" placeholder="type a command and press Enter — sent to the session" spellcheck="false" />
+          <button class="btn sm" data-key="C-c" title="Send Ctrl+C">^C</button>
+          <button class="btn sm" data-key="Up" title="Send Up arrow">↑</button>
+          <button class="btn sm" id="tmxReload" title="Refresh screen">⟳</button>
+        </div>
+      </div>
+    </div>`;
+
+  let cur = null, timer = null;
+  const pane = el.querySelector('#tmxPane');
+  const stopPoll = () => { if (timer) { clearInterval(timer); timer = null; } };
+  setTabCleanup(stopPoll);
+
+  async function loadPane() {
+    if (!cur) return;
+    try {
+      const r = await api('tmux/capture?name=' + encodeURIComponent(cur));
+      pane.textContent = r.text;
+      pane.scrollTop = pane.scrollHeight;
+    } catch (err) { pane.textContent = '⚠ ' + err.message; stopPoll(); }
+  }
+  function select(name) {
+    cur = name;
+    el.querySelectorAll('.tmx-sess').forEach(x => x.classList.toggle('active', x.dataset.s === name));
+    el.querySelector('#tmxInputRow').classList.remove('hidden');
+    loadPane();
+    stopPoll();
+    timer = setInterval(loadPane, 2000); // live-ish refresh
+  }
+
+  el.querySelector('#tmxRefresh').onclick = () => { stopPoll(); TABS.tmux(el); };
+  el.querySelector('#tmxCreate').onclick = async () => {
+    try {
+      await api('tmux/new', {
+        name: el.querySelector('#tmxNewName').value,
+        command: el.querySelector('#tmxNewCmd').value,
+        cwd: S.cwd
+      });
+      toast('Session created', 'ok');
+      stopPoll(); TABS.tmux(el);
+    } catch (err) { toast(err.message, 'err', 7000); }
+  };
+  el.querySelector('#tmxReload').onclick = loadPane;
+  el.querySelector('#tmxSend').addEventListener('keydown', async (ev) => {
+    if (ev.key !== 'Enter' || !cur) return;
+    const v = ev.target.value;
+    ev.target.value = '';
+    try { await api('tmux/send', { name: cur, command: v }); setTimeout(loadPane, 300); }
+    catch (err) { toast(err.message, 'err'); }
+  });
+  el.onclick = async (e) => {
+    const kill = e.target.closest('.tmx-kill');
+    const key = e.target.closest('button[data-key]');
+    const sess = e.target.closest('.tmx-sess');
+    if (kill) {
+      e.stopPropagation();
+      const name = kill.dataset.k;
+      confirmModal(`Kill session “${name}”?`, 'Everything running inside it stops.', async () => {
+        await api('tmux/kill', { name });
+        toast('Session killed', 'ok');
+        if (cur === name) { cur = null; stopPoll(); }
+        openModal('modalTools'); TABS.tmux(el);
+      }, 'Kill');
+      return;
+    }
+    if (key && cur) {
+      await api('tmux/send', { name: cur, keys: key.dataset.key });
+      setTimeout(loadPane, 300);
+      return;
+    }
+    if (sess) select(sess.dataset.s);
   };
 };
 
