@@ -570,3 +570,25 @@ code {
 .tmx-input { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 .tmx-input .prompt { color: var(--acc2); font-family: var(--mono); }
 .tmx-input input { font-family: var(--mono); font-size: 12.5px; }
+
+/* ══════════ v1.4 — real terminal ══════════ */
+.term-panel { height: 300px; position: relative; }
+.term-panel.term-max { height: calc(100vh - 190px) !important; }
+.term-resize {
+  position: absolute; top: -3px; left: 0; right: 0; height: 7px;
+  cursor: ns-resize; z-index: 3;
+}
+.term-resize:hover { background: var(--acc); opacity: 0.35; }
+.term-status { font-size: 11.5px; color: var(--dim); }
+.term-status.ok { color: var(--acc2); }
+.term-status.warn { color: var(--warn); }
+.term-status.err { color: var(--danger); }
+.term {
+  flex: 1; min-height: 0; overflow: hidden; outline: none;
+  background: #05090d; padding: 8px 10px;
+  font-family: var(--mono); font-size: 13px; line-height: 1.25;
+  color: #d5e2ee; white-space: pre; cursor: text; user-select: text;
+}
+.term:focus { box-shadow: inset 0 0 0 1px rgba(58,160,255,0.35); }
+.term .trow { height: 1.25em; white-space: pre; }
+.xterm-lite span { white-space: pre; }

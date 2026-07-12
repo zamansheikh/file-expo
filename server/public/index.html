@@ -136,7 +136,7 @@
     <button id="btnPalette" class="btn sm ghost" title="Command palette (Ctrl+K)">⌘K</button>
     <button id="btnViewMode" class="btn sm ghost" title="Toggle list / grid view">▦</button>
     <label class="chk"><input type="checkbox" id="chkHidden" /> Hidden files</label>
-    <button id="actConsole" class="btn sm ghost">＞_ Console</button>
+    <button id="actConsole" class="btn sm ghost" title="Real terminal (persistent shell)">＞_ Terminal</button>
     <button id="actTransfers" class="btn sm ghost">⇅ Transfers <span id="transferCount" class="cnt hidden">0</span></button>
   </div>
 
@@ -178,17 +178,21 @@
     <div id="transferList" class="transfer-list"></div>
   </div>
 
-  <div id="panelConsole" class="bottom-panel hidden">
-    <div class="bp-head"><b>Console</b> <span class="muted" id="consoleCwd"></span>
+  <div id="panelConsole" class="bottom-panel term-panel hidden">
+    <div class="term-resize" id="termResize" title="Drag to resize"></div>
+    <div class="bp-head">
+      <b>＞_ Terminal</b>
+      <span class="muted" id="consoleCwd"></span>
+      <span id="termStatus" class="term-status"></span>
       <span class="spacer"></span>
-      <button id="btnClearConsole" class="btn sm ghost">Clear</button>
+      <span class="muted" id="termSize" style="font-size:11px;font-family:var(--mono)"></span>
+      <button id="btnTermCwd" class="btn sm ghost" title="cd to the folder open in the explorer">cd here</button>
+      <button id="btnTermClear" class="btn sm ghost" title="Clear (Ctrl+L)">Clear</button>
+      <button id="btnTermRestart" class="btn sm ghost" title="Restart the shell">⟳</button>
+      <button id="btnTermMax" class="ibtn" title="Maximize / restore">⛶</button>
       <button class="ibtn" id="closeConsole">✕</button>
     </div>
-    <pre id="consoleOut" class="console-out"></pre>
-    <div class="console-in">
-      <span class="prompt">$</span>
-      <input id="consoleInput" spellcheck="false" placeholder="run a command in the current folder…" />
-    </div>
+    <div id="termEl" class="term"></div>
   </div>
 
   <div class="statusbar">
@@ -343,6 +347,7 @@
 
 <div id="toasts" class="toasts"></div>
 
+<script src="term.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

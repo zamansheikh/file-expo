@@ -14,7 +14,7 @@ const os = require('os');
 const CONF_DIR = process.env.FILE_EXPO_CONF || '/etc/file-expo';
 const CONF_FILE = path.join(CONF_DIR, 'config.json');
 const PUB = path.join(__dirname, 'public');
-const VERSION = '1.3.1';
+const VERSION = '1.4.0';
 const REPO = 'zamansheikh/file-expo';
 const BRANCH = 'main';
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -155,6 +155,7 @@ function serveStatic(req, res, urlPath) {
     // version-stamp asset URLs so browsers never mix old JS with new HTML
     let html = fs.readFileSync(fp, 'utf8')
       .replace('href="styles.css"', `href="styles.css?v=${VERSION}"`)
+      .replace('src="term.js"', `src="term.js?v=${VERSION}"`)
       .replace('src="app.js"', `src="app.js?v=${VERSION}"`);
     res.writeHead(200, { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-cache' });
     return res.end(html);
@@ -701,11 +702,18 @@ async function handleApi(req, res, u) {
   /* ---------- docker ---------- */
   if (route === 'docker/ps') {
     if (!(await hasCmd('docker'))) return json(res, 200, { installed: false, containers: [] });
-    const r = await run(`docker ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}' 2>/dev/null`);
-    const containers = r.stdout.split('\n').filter(Boolean).map(l => {
-      const p = l.split('|');
-      return { id: p[0], name: p[1] || '', image: p[2] || '', status: p[3] || '', ports: p[4] || '' };
-    });
+    const r = await run(`docker ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}' 2>&1`);
+    if (r.code !== 0) {
+      // docker is on PATH but not usable (daemon stopped, no permission, WSL shim…)
+      return json(res, 200, { installed: true, error: r.stdout.trim().split('\n')[0].slice(0, 200) || 'docker is not responding', containers: [] });
+    }
+    const containers = r.stdout.split('\n')
+      .filter(l => l.includes('|'))
+      .map(l => {
+        const p = l.split('|');
+        return { id: p[0], name: p[1] || '', image: p[2] || '', status: p[3] || '', ports: p[4] || '' };
+      })
+      .filter(c => /^[a-f0-9]{6,}$/i.test(c.id)); // never render an error line as a container
     return json(res, 200, { installed: true, containers });
   }
 
@@ -1168,6 +1176,13 @@ const server = http.createServer(async (req, res) => {
     else res.end();
   }
 });
+
+/* real PTY terminal over WebSocket */
+try {
+  require('./terminal').attach(server, { isAuthed: (req) => validSession(cookies(req).fx_sess) });
+} catch (e) {
+  console.error('Terminal unavailable:', e.message);
+}
 
 server.listen(conf.port, '0.0.0.0', () => {
   console.log(`File Expo v${VERSION} listening on port ${conf.port}`);

@@ -251,7 +251,7 @@ async function doLogin() {
 }
 
 /* ══════════ file manager ══════════ */
-const CLIENT_VERSION = '1.3.1';
+const CLIENT_VERSION = '1.4.0';
 
 async function enterFileManager() {
   S.sys = await api('sysinfo');
@@ -967,52 +967,117 @@ async function entriesFromDrop(dt) {
   return out;
 }
 
-/* ---------- console ---------- */
-$('actConsole').addEventListener('click', () => {
-  $('panelConsole').classList.toggle('hidden');
+/* ---------- terminal (real PTY over WebSocket) ---------- */
+const T = { term: null, ws: null, connected: false, ro: null };
+
+function termStatus(text, cls) {
+  const el = $('termStatus');
+  el.textContent = text;
+  el.className = 'term-status ' + (cls || '');
+}
+
+function termConnect(cwd) {
+  if (T.ws) { try { T.ws.close(); } catch (e) {} T.ws = null; }
+  const el = $('termEl');
+
+  if (!T.term) {
+    T.term = new Term(el, { onData: (d) => { if (T.connected) T.ws.send(d); } });
+    // keep the PTY's window size in sync with the panel
+    T.ro = new ResizeObserver(() => termFit());
+    T.ro.observe(el);
+  } else {
+    T.term.reset();
+    T.term.scrollback = [];
+    T.term.markDirty();
+  }
+
+  T.term.fit();
+  const { cols, rows } = T.term;
+  $('termSize').textContent = `${cols}×${rows}`;
+  termStatus('connecting…', 'warn');
+
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${proto}//${location.host}/ws/term?cwd=${encodeURIComponent(cwd || S.cwd)}&cols=${cols}&rows=${rows}`);
+  ws.binaryType = 'arraybuffer';
+  T.ws = ws;
+
+  ws.onopen = () => { T.connected = true; termStatus('● connected', 'ok'); el.focus(); };
+  ws.onmessage = (e) => T.term.write(typeof e.data === 'string' ? e.data : new Uint8Array(e.data));
+  ws.onclose = () => {
+    T.connected = false;
+    termStatus('○ disconnected — press ⟳ to restart', '');
+  };
+  ws.onerror = () => termStatus('connection error', 'err');
+}
+
+function termFit() {
+  if (!T.term || $('panelConsole').classList.contains('hidden')) return;
+  const changed = T.term.fit();
+  if (changed) {
+    $('termSize').textContent = `${changed.cols}×${changed.rows}`;
+    if (T.connected) {
+      // \0 prefix = control message, everything else is keystrokes
+      T.ws.send('\0' + JSON.stringify({ t: 'resize', cols: changed.cols, rows: changed.rows }));
+    }
+  }
+}
+
+function openTerminal() {
+  $('panelConsole').classList.remove('hidden');
   $('panelTransfers').classList.add('hidden');
-  if (!$('panelConsole').classList.contains('hidden')) $('consoleInput').focus();
+  if (!T.ws || !T.connected) termConnect(S.cwd);
+  else { termFit(); $('termEl').focus(); }
+}
+
+$('actConsole').addEventListener('click', () => {
+  if ($('panelConsole').classList.contains('hidden')) openTerminal();
+  else $('panelConsole').classList.add('hidden');
 });
 $('closeConsole').addEventListener('click', () => $('panelConsole').classList.add('hidden'));
-$('btnClearConsole').addEventListener('click', () => { $('consoleOut').textContent = ''; });
-const conHist = [];
-let conHistIdx = -1;
-$('consoleInput').addEventListener('keydown', async (e) => {
-  if (e.key === 'ArrowUp') {
-    e.preventDefault();
-    if (conHist.length) {
-      conHistIdx = conHistIdx < 0 ? conHist.length - 1 : Math.max(0, conHistIdx - 1);
-      $('consoleInput').value = conHist[conHistIdx];
-    }
-    return;
-  }
-  if (e.key === 'ArrowDown') {
-    e.preventDefault();
-    if (conHistIdx >= 0) {
-      conHistIdx++;
-      if (conHistIdx >= conHist.length) { conHistIdx = -1; $('consoleInput').value = ''; }
-      else $('consoleInput').value = conHist[conHistIdx];
-    }
-    return;
-  }
-  if (e.key !== 'Enter') return;
-  const cmd = $('consoleInput').value.trim();
-  if (!cmd) return;
-  conHist.push(cmd);
-  conHistIdx = -1;
-  $('consoleInput').value = '';
-  const out = $('consoleOut');
-  out.textContent += `\n${S.cwd} $ ${cmd}\n`;
-  out.scrollTop = out.scrollHeight;
-  try {
-    const r = await api('exec', { cmd, cwd: S.cwd });
-    out.textContent += (r.output || '(no output)') + (r.code ? `\n[exit ${r.code}]` : '') + '\n';
-  } catch (err) {
-    out.textContent += '!! ' + err.message + '\n';
-  }
-  out.scrollTop = out.scrollHeight;
-  if (/^(rm|mv|cp|mkdir|touch|chmod|chown|tar|zip|unzip|git|wget|curl -[oO])/.test(cmd)) refresh();
+$('btnTermRestart').addEventListener('click', () => termConnect(S.cwd));
+$('btnTermClear').addEventListener('click', () => {
+  if (T.connected) T.ws.send('\x0c'); // Ctrl+L — the shell redraws its prompt
+  else if (T.term) { T.term.reset(); T.term.markDirty(); }
 });
+$('btnTermCwd').addEventListener('click', () => {
+  if (!T.connected) return termConnect(S.cwd);
+  T.ws.send(`cd '${S.cwd.replace(/'/g, `'\\''`)}'\r`);
+  $('termEl').focus();
+});
+$('btnTermMax').addEventListener('click', () => {
+  $('panelConsole').classList.toggle('term-max');
+  setTimeout(termFit, 60);
+});
+
+// drag the top edge to resize the terminal
+(() => {
+  const panel = $('panelConsole');
+  const handle = $('termResize');
+  let startY = 0, startH = 0, dragging = false;
+  handle.addEventListener('mousedown', (e) => {
+    dragging = true; startY = e.clientY; startH = panel.getBoundingClientRect().height;
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const h = Math.min(window.innerHeight - 160, Math.max(120, startH + (startY - e.clientY)));
+    panel.style.height = h + 'px';
+    localStorage.setItem('fx-term-h', h);
+  });
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    termFit();
+  });
+  const saved = parseInt(localStorage.getItem('fx-term-h'), 10);
+  if (saved) panel.style.height = saved + 'px';
+})();
+
+window.addEventListener('resize', () => termFit());
 
 /* ---------- context menu ---------- */
 function showCtxMenu(x, y) {
@@ -1095,6 +1160,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if ($('screen-fm').classList.contains('hidden')) return;
+  if (document.activeElement === $('termEl')) return; // terminal owns every key
   const inInput = ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName);
   if (inInput) { if (e.key === 'Escape') document.activeElement.blur(); return; }
 
@@ -1780,7 +1846,8 @@ function paletteSources() {
   act('⟳', 'Refresh', refresh);
   act('👁', 'Toggle hidden files', () => { $('chkHidden').checked = !$('chkHidden').checked; S.showHidden = $('chkHidden').checked; renderList(); });
   act('▦', 'Toggle grid / list view', () => $('btnViewMode').click());
-  act('＞_', 'Open console', () => $('actConsole').click());
+  act('＞_', 'Open terminal', openTerminal);
+  act('📂', 'Terminal: cd to this folder', () => { openTerminal(); setTimeout(() => $('btnTermCwd').click(), 300); });
   act('⇅', 'Open transfers', () => $('actTransfers').click());
   act('🧩', 'Views — preview add-ons', () => $('btnViews').click());
   act('🗑', 'Open Trash', openTrash);
@@ -1847,6 +1914,7 @@ $('palette').addEventListener('mousedown', (e) => { if (e.target === $('palette'
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
     if ($('screen-fm').classList.contains('hidden')) return;
+    if (document.activeElement === $('termEl')) return; // Ctrl+K belongs to the shell
     e.preventDefault();
     if ($('palette').classList.contains('hidden')) openPalette();
     else closePalette();
@@ -1859,6 +1927,14 @@ TABS.docker = async (el) => {
   if (!d.installed) {
     el.innerHTML = `<div class="muted" style="padding:24px">🐳 Docker is not installed on this server.<br/><br/>
       Install it from the Console with:<br/><code>curl -fsSL https://get.docker.com | sh</code></div>`;
+    return;
+  }
+  if (d.error) {
+    el.innerHTML = `<div class="muted" style="padding:24px">🐳 Docker is installed but not responding:<br/><br/>
+      <code>${esc(d.error)}</code><br/><br/>
+      Start it with <code>systemctl start docker</code> (Services tab), then refresh.<br/><br/>
+      <button id="dkRetry" class="btn sm">⟳ Retry</button></div>`;
+    el.querySelector('#dkRetry').onclick = () => TABS.docker(el);
     return;
   }
   el.innerHTML = `<div class="tool-bar"><span class="muted">${d.containers.length} container(s)</span><span class="spacer"></span>

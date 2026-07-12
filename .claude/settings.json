@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wsl -l -q)",
+      "Bash(echo \"--- wsl exit: $? ---\")",
+      "Bash(wsl -e bash -c \"command -v python3 && command -v node && echo LINUX_READY\")",
+      "Bash(cp \"C:/Users/zaman/AppData/Local/Temp/claude/f--Games-file-expo/c36258c5-21ee-4761-8af4-45b2ca900fe9/scratchpad/wstest.js\" /tmp/wstest.js)",
+      "Bash(wsl -e bash -c ' *)"
+    ]
+  }
+}
