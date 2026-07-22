@@ -31,10 +31,13 @@ command -v node >/dev/null 2>&1 || die "node is not installed — File Expo need
 if [ "${1:-}" != "" ]; then
   NEWPASS="$1"
 else
-  printf "%s" "${B}New panel password (min 6 chars): ${N}"
-  read -rs NEWPASS; echo
-  printf "%s" "${B}Confirm password: ${N}"
-  read -rs NEWPASS2; echo
+  # Read from the terminal, not stdin — so this works under `curl ... | sudo bash`,
+  # where stdin is the piped script rather than the keyboard.
+  [ -e /dev/tty ] || die "no password given and no terminal to prompt on — pass it as an argument: sudo bash reset-password.sh 'newpass'"
+  printf "%s" "${B}New panel password (min 6 chars): ${N}" > /dev/tty
+  read -rs NEWPASS < /dev/tty; echo > /dev/tty
+  printf "%s" "${B}Confirm password: ${N}" > /dev/tty
+  read -rs NEWPASS2 < /dev/tty; echo > /dev/tty
   [ "$NEWPASS" = "$NEWPASS2" ] || die "passwords do not match"
 fi
 [ "${#NEWPASS}" -ge 6 ] || die "password must be at least 6 characters"
