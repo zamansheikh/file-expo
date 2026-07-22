@@ -44,6 +44,16 @@ Re-run the install command — your password and settings are kept.
 curl -fsSL https://raw.githubusercontent.com/zamansheikh/file-expo/main/install.sh | sudo bash -s -- --uninstall
 ```
 
+### Forgot your password?
+
+Run this on the VPS to set a new panel password — no reinstall, no data loss:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zamansheikh/file-expo/main/reset-password.sh | sudo bash -s -- 'yournewpassword'
+```
+
+Leave off the password to be prompted for it instead. It keeps your domains, trash and settings — only the login password changes.
+
 ## 🆕 What's new in v1.2
 
 - **🗑 Trash with Undo** — Delete moves items to a server-side Trash and shows an *Undo* toast. Restore or purge from the Trash panel (sidebar). `Shift+Del` = permanent delete.
